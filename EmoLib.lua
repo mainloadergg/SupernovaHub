@@ -1,8 +1,3 @@
---[[
-    EmoLib v8 - MM2 Style UI Library
-    Embeddable | CreateWindow API | Lucide icons | Reflectance | Multi dropdown
-]]
-
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
