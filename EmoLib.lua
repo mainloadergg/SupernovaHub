@@ -1,3 +1,9 @@
+--[[
+    EmoLib v8.1 - MM2 Style UI Library
+    Embeddable | CreateWindow API | Lucide icons | Reflectance | Multi dropdown
+    v8.1: Slider/Input com Increment (aliases: Increase, Step), padrao 0.1
+]]
+
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
@@ -10,7 +16,7 @@ local TextService = game:GetService("TextService")
 local Camera = workspace.CurrentCamera
 
 local EmoLib = {
-    Version = "8.0.0",
+    Version = "8.1.0",
     Windows = {},
 }
 
@@ -888,6 +894,26 @@ local function MeasureHeight(text, size, font, width)
     end)
     if ok and result then return math.ceil(result.Y) end
     return size + 2
+end
+
+-- Conta casas decimais de um numero (ex: 0.25 -> 2, 1 -> 0)
+local function CountDecimals(n)
+    n = tonumber(n) or 0
+    local s = string.format("%.10f", n):gsub("0+$", "")
+    local d = s:match("%.(%d+)")
+    return d and #d or 0
+end
+
+-- Encaixa o valor no passo (Increment), respeita Min/Max e limpa o float
+local function SnapValue(v, min, max, inc)
+    inc = tonumber(inc) or 0
+    if inc > 0 then
+        v = min + math.floor((v - min) / inc + 0.5) * inc
+    end
+    v = math.clamp(v, min, max)
+    local dec = math.max(CountDecimals(inc), CountDecimals(min))
+    local m = 10 ^ dec
+    return math.floor(v * m + 0.5) / m
 end
 
 local AssetQueue = {
@@ -2052,7 +2078,10 @@ function EmoLib:CreateWindow(config)
         function Tab:AddSlider(cfg)
             cfg = cfg or {}
             local title, subtitle = cfg.Title or "Slider", cfg.Description or cfg.Subtitle or ""
-            local min, max, default, callback = cfg.Min or 0, cfg.Max or 100, cfg.Default or 0, cfg.Callback
+            local min, max, callback = cfg.Min or 0, cfg.Max or 100, cfg.Callback
+            -- passo do slider: Increment (aliases: Increase, Step). Padrao 0.1
+            local inc = tonumber(cfg.Increment or cfg.Increase or cfg.Step) or 0.1
+            local default = SnapValue(cfg.Default or min, min, max, inc)
 
             local frame = Create("Frame", {
                 Name = "Slider", Parent = page, BackgroundColor3 = Color3.fromRGB(14, 14, 14),
@@ -2090,7 +2119,7 @@ function EmoLib:CreateWindow(config)
             Create("UICorner", {Parent = barBg, CornerRadius = UDim.new(1, 0)})
             local barFill = Create("Frame", {
                 Parent = barBg, BackgroundColor3 = config.AccentColor,
-                Size = UDim2.new((default - min) / math.max(max - min, 1), 0, 1, 0), BorderSizePixel = 0,
+                Size = UDim2.new((default - min) / math.max(max - min, 1e-9), 0, 1, 0), BorderSizePixel = 0,
             })
             Create("UICorner", {Parent = barFill, CornerRadius = UDim.new(1, 0)})
 
@@ -2124,16 +2153,21 @@ function EmoLib:CreateWindow(config)
             task.defer(function() Relayout(true) end)
 
             local sliding, value = false, default
-            local function Update(val)
-                value = math.clamp(val, min, max)
-                barFill.Size = UDim2.new((value - min) / math.max(max - min, 1), 0, 1, 0)
-                valueL.Text = tostring(math.floor(value * 10) / 10)
-                if callback then callback(value) end
+
+            local function Apply(val, fire)
+                local snapped = SnapValue(val, min, max, inc)
+                local changed = snapped ~= value
+                value = snapped
+                barFill.Size = UDim2.new((value - min) / math.max(max - min, 1e-9), 0, 1, 0)
+                valueL.Text = tostring(value)
+                if fire and changed and callback then callback(value) end
             end
+
             local function FromInput(input)
                 local rel = math.clamp((input.Position.X - barBg.AbsolutePosition.X) / math.max(barBg.AbsoluteSize.X, 1), 0, 1)
-                Update(min + (max - min) * rel)
+                Apply(min + (max - min) * rel, true)
             end
+
             barHit.InputBegan:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                     sliding = true
@@ -2148,11 +2182,13 @@ function EmoLib:CreateWindow(config)
                     FromInput(input)
                 end
             end)
+
             return {
                 SetTitle = function(_, t) titleL.Text = t; Relayout(true) end,
                 SetSubtitle = function(_, t) subL.Text = t or ""; Relayout(true) end,
-                SetValue = function(_, v) Update(v) end,
+                SetValue = function(_, v) Apply(v, false) end,
                 GetValue = function() return value end,
+                SetCallback = function(_, cb) callback = cb end,
             }
         end
 
@@ -2160,6 +2196,10 @@ function EmoLib:CreateWindow(config)
             cfg = cfg or {}
             local title, subtitle = cfg.Title or "Input", cfg.Description or cfg.Subtitle or ""
             local placeholder, callback, default = cfg.Placeholder or "Type here...", cfg.Callback, cfg.Default or ""
+            -- modo numerico: Numeric = true (usa Min, Max e Increment/Increase/Step)
+            local numeric = cfg.Numeric == true
+            local nMin, nMax = cfg.Min or -math.huge, cfg.Max or math.huge
+            local inc = tonumber(cfg.Increment or cfg.Increase or cfg.Step) or 0.1
 
             local BOX_W = 130
             local row, frame = BuildRow(page, "Input", title, subtitle, BOX_W)
@@ -2177,19 +2217,39 @@ function EmoLib:CreateWindow(config)
             Create("UIPadding", {Parent = box, PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8)})
             local boxStroke = Create("UIStroke", {Parent = box, Color = Color3.fromRGB(50, 50, 50), Thickness = 1, Transparency = 0.3})
 
+            local lastValid = tostring(default)
+
             box.Focused:Connect(function()
                 Tween(boxStroke, {Color = config.AccentColor, Transparency = 0}, 0.12)
             end)
             box.FocusLost:Connect(function(enter)
                 Tween(boxStroke, {Color = Color3.fromRGB(50, 50, 50), Transparency = 0.3}, 0.12)
+                if numeric then
+                    local n = tonumber(box.Text)
+                    if n then
+                        local lo = nMin == -math.huge and -1e18 or nMin
+                        local hi = nMax == math.huge and 1e18 or nMax
+                        n = SnapValue(n, lo, hi, inc)
+                        box.Text = tostring(n)
+                        lastValid = box.Text
+                        if callback then callback(n, enter) end
+                    else
+                        box.Text = lastValid
+                    end
+                    return
+                end
                 if callback then callback(box.Text, enter) end
             end)
 
             return {
                 SetTitle = function(_, t) row.SetTitle(t) end,
                 SetSubtitle = function(_, t) row.SetSubtitle(t) end,
-                SetText = function(_, t) box.Text = t end,
+                SetText = function(_, t) box.Text = t; lastValid = tostring(t) end,
                 GetText = function() return box.Text end,
+                GetValue = function()
+                    if numeric then return tonumber(box.Text) end
+                    return box.Text
+                end,
                 SetCallback = function(_, cb) callback = cb end,
             }
         end
