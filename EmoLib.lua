@@ -1,9 +1,3 @@
---[[
-    EmoLib v8.1 - MM2 Style UI Library
-    Embeddable | CreateWindow API | Lucide icons | Reflectance | Multi dropdown
-    v8.1: Slider/Input com Increment (aliases: Increase, Step), padrao 0.1
-]]
-
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
@@ -2572,8 +2566,23 @@ function EmoLib:CreateWindow(config)
     end
 
     function Window:SetTitle(title, subtitle)
-        TitleLabel.Text = title or config.Title
-        if subtitle then SubTitleLabel.Text = subtitle end
+        if title ~= nil then
+            TitleLabel.Text = title
+        end
+        if subtitle ~= nil then
+            SubTitleLabel.Text = subtitle
+        end
+    end
+
+    function Window:SetSubtitle(subtitle)
+        if subtitle ~= nil then
+            SubTitleLabel.Text = tostring(subtitle)
+        end
+    end
+
+    -- alias used by scripts that call SetSubTitle
+    function Window:SetSubTitle(subtitle)
+        self:SetSubtitle(subtitle)
     end
 
     function Window:SetLogo(source)
