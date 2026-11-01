@@ -10,7 +10,7 @@ local TextService = game:GetService("TextService")
 local Camera = workspace.CurrentCamera
 
 local EmoLib = {
-    Version = "8.4.0",
+    Version = "8.4.1",
     Windows = {},
 }
 
@@ -1709,13 +1709,15 @@ function EmoLib:CreateWindow(config)
     }
 
     local function HeaderButton(icon, pos, callback)
+        local idle = config.AccentColor
+        local hover = (config._Theme and config._Theme.AccentBright) or config.AccentColor
         local btn = Create("ImageButton", {
             Parent = Header, BackgroundTransparency = 1, Size = UDim2.fromOffset(20, 20),
             Position = pos, Image = EmoLib:GetIcon(icon) or "rbxassetid://0",
-            ImageColor3 = config._Theme and config._Theme.AccentSoft or Color3.fromRGB(200, 60, 60), ScaleType = Enum.ScaleType.Fit, ZIndex = 4,
+            ImageColor3 = idle, ScaleType = Enum.ScaleType.Fit, ZIndex = 4,
         })
-        btn.MouseEnter:Connect(function() Tween(btn, {ImageColor3 = Color3.fromRGB(255, 90, 90)}, 0.12) end)
-        btn.MouseLeave:Connect(function() Tween(btn, {ImageColor3 = Color3.fromRGB(200, 60, 60)}, 0.12) end)
+        btn.MouseEnter:Connect(function() Tween(btn, {ImageColor3 = hover}, 0.12) end)
+        btn.MouseLeave:Connect(function() Tween(btn, {ImageColor3 = idle}, 0.12) end)
         btn.MouseButton1Click:Connect(function() PlayClick(); if callback then callback() end end)
         return btn
     end
@@ -1867,36 +1869,10 @@ function EmoLib:CreateWindow(config)
     local CORNER_R = 6
     local GROUP_GAP = 8  -- space between groups / after sections
 
-    -- WindUI-style linked groups:
-    -- consecutive elements are reparented into one card container (single stroke,
-    -- single outer radius). Inner rows have no stroke and 0 gap, so nothing looks "solto".
+    -- Light visual linking: no reparenting (reparenting broke section order).
+    -- Consecutive element cards share a tighter look via corner radius only.
     local function RefreshLinkedCorners(page)
         if not page or not page.Parent then return end
-
-        -- Flatten: move any previously grouped children back to page first (keep order)
-        local baseOrder = 0
-        for _, ch in ipairs(page:GetChildren()) do
-            if ch:IsA("Frame") and ch:GetAttribute("EmoGroup") then
-                local kids = {}
-                for _, k in ipairs(ch:GetChildren()) do
-                    if k:IsA("GuiObject") and not k:IsA("UIListLayout") and not k:IsA("UIPadding") and not k:IsA("UICorner") and not k:IsA("UIStroke") then
-                        table.insert(kids, k)
-                    end
-                end
-                table.sort(kids, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
-                for i, k in ipairs(kids) do
-                    k.LayoutOrder = baseOrder + i
-                    k.Parent = page
-                end
-                baseOrder = baseOrder + #kids + 1
-                ch:Destroy()
-            else
-                if ch:IsA("GuiObject") and not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then
-                    baseOrder += 1
-                    ch.LayoutOrder = baseOrder
-                end
-            end
-        end
 
         local ordered = {}
         for _, ch in ipairs(page:GetChildren()) do
@@ -1904,8 +1880,13 @@ function EmoLib:CreateWindow(config)
                 table.insert(ordered, ch)
             end
         end
+        -- stable sort by LayoutOrder then by current index
+        table.sort(ordered, function(a, b)
+            local la, lb = a.LayoutOrder or 0, b.LayoutOrder or 0
+            if la == lb then return false end
+            return la < lb
+        end)
 
-        -- Split into runs of consecutive EmoElement frames (sections break the run)
         local groups = {}
         local current = {}
         local function flush()
@@ -1917,8 +1898,7 @@ function EmoLib:CreateWindow(config)
         for _, ch in ipairs(ordered) do
             if ch:GetAttribute("EmoSectionBreak") then
                 flush()
-            elseif ch:GetAttribute("EmoElement") or (ch:FindFirstChildOfClass("UIStroke") and ch.Name ~= "Section") then
-                ch:SetAttribute("EmoElement", true)
+            elseif ch:GetAttribute("EmoElement") then
                 table.insert(current, ch)
             else
                 flush()
@@ -1927,49 +1907,29 @@ function EmoLib:CreateWindow(config)
         flush()
 
         for _, group in ipairs(groups) do
-            if #group < 2 then
-                -- single element: full corner + own stroke
-                local frame = group[1]
+            local n = #group
+            for i, frame in ipairs(group) do
                 local corner = frame:FindFirstChildOfClass("UICorner")
-                if corner then corner.CornerRadius = UDim.new(0, CORNER_R) end
+                if not corner then
+                    corner = Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
+                end
                 local stroke = frame:FindFirstChildOfClass("UIStroke")
-                if stroke then stroke.Enabled = true; stroke.Transparency = 0.5 end
+                if stroke then
+                    stroke.Enabled = true
+                    stroke.Transparency = 0.5
+                end
+                -- remove any leftover divs from old version
                 local div = frame:FindFirstChild("_LinkDiv")
                 if div then div:Destroy() end
-            else
-                -- multi: wrap in one card
-                local first = group[1]
-                local order = first.LayoutOrder
-                local container = Create("Frame", {
-                    Name = "ElementGroup",
-                    Parent = page,
-                    BackgroundColor3 = Color3.fromRGB(14, 14, 14),
-                    BorderSizePixel = 0,
-                    Size = UDim2.new(1, 0, 0, 0),
-                    AutomaticSize = Enum.AutomaticSize.Y,
-                    LayoutOrder = order,
-                    ZIndex = 2,
-                })
-                container:SetAttribute("EmoGroup", true)
-                Create("UICorner", {Parent = container, CornerRadius = UDim.new(0, CORNER_R)})
-                Create("UIStroke", {
-                    Parent = container, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5,
-                })
-                Create("UIListLayout", {
-                    Parent = container, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 0),
-                })
+                local line = frame:FindFirstChild("_RowLine")
+                if line then line:Destroy() end
 
-                for i, frame in ipairs(group) do
-                    -- strip individual card chrome
-                    local stroke = frame:FindFirstChildOfClass("UIStroke")
-                    if stroke then stroke.Enabled = false end
-                    local corner = frame:FindFirstChildOfClass("UICorner")
-                    if corner then corner.CornerRadius = UDim.new(0, 0) end
-                    local div = frame:FindFirstChild("_LinkDiv")
-                    if div then div:Destroy() end
-                    frame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
-                    frame.LayoutOrder = i
-                    frame.Parent = container
+                if n == 1 then
+                    corner.CornerRadius = UDim.new(0, CORNER_R)
+                elseif i == 1 or i == n then
+                    corner.CornerRadius = UDim.new(0, CORNER_R)
+                else
+                    corner.CornerRadius = UDim.new(0, 2)
                 end
             end
         end
@@ -1978,10 +1938,11 @@ function EmoLib:CreateWindow(config)
     local function BuildRow(page, name, title, subtitle, rightWidth)
         rightWidth = rightWidth or 0
         local frame = Create("Frame", {
-            Name = name, Parent = page, BackgroundColor3 = Color3.fromRGB(14, 14, 14),
+            Name = name, BackgroundColor3 = Color3.fromRGB(14, 14, 14),
             Size = UDim2.new(1, 0, 0, ROW_MIN), BorderSizePixel = 0,
         })
         frame:SetAttribute("EmoElement", true)
+        frame.Parent = page
         Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
         Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
         task.defer(function() RefreshLinkedCorners(page) end)
@@ -2069,7 +2030,7 @@ function EmoLib:CreateWindow(config)
             Name = name .. "_Page", Parent = ContentScroll, BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 0, 0), Visible = false, AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
         })
-        Create("UIListLayout", {Parent = page, Padding = UDim.new(0, GROUP_GAP), SortOrder = Enum.SortOrder.LayoutOrder})
+        Create("UIListLayout", {Parent = page, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder})
 
         local Tab = {Button = tabBtn, Page = page, Title = tabTitle, Name = name, ScrollPos = Vector2.new(0, 0)}
 
@@ -2108,8 +2069,8 @@ function EmoLib:CreateWindow(config)
             -- API:
             --   AddSection("Title")
             --   AddSection("Title", "icon")
-            --   AddSection("Title", true / false)              -- chevron, Opened
-            --   AddSection("Title", "icon", true / false)
+            --   AddSection("Title", true/false)
+            --   AddSection("Title", "icon", true/false)
             --   AddSection({ Title=, Icon=, Opened= })
             local title, icon, opened, expandable
             if type(a) == "table" then
@@ -2127,12 +2088,12 @@ function EmoLib:CreateWindow(config)
                 if type(b) == "boolean" then
                     icon = nil
                     expandable = true
-                    opened = b
+                    opened = b and true or false
                 elseif type(b) == "string" then
                     icon = b
                     if type(c) == "boolean" then
                         expandable = true
-                        opened = c
+                        opened = c and true or false
                     else
                         expandable = false
                         opened = true
@@ -2144,40 +2105,49 @@ function EmoLib:CreateWindow(config)
                 end
             end
 
-            local HEADER_H = 28
+            local HEADER_H = 26
             local section = Create("Frame", {
-                Name = "Section", Parent = page, BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, HEADER_H), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
+                Name = "Section",
+                Parent = page,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, HEADER_H),
+                ZIndex = 2,
             })
             section:SetAttribute("EmoSectionBreak", true)
 
             local header = Create("TextButton", {
-                Name = "Header", Parent = section,
-                BackgroundColor3 = Color3.fromRGB(18, 18, 18),
-                BackgroundTransparency = expandable and 0.55 or 1,
-                Size = UDim2.new(1, 0, 0, HEADER_H), Text = "", AutoButtonColor = false, ZIndex = 3,
+                Name = "Header",
+                Parent = section,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, HEADER_H),
+                Text = "",
+                AutoButtonColor = false,
+                ZIndex = 3,
             })
-            Create("UICorner", {Parent = header, CornerRadius = UDim.new(0, 4)})
 
-            local leftPad = 8
+            local leftPad = 0
             if icon then
                 local r = EmoLib:GetIcon(icon)
                 if r then
                     Create("ImageLabel", {
-                        Parent = header, BackgroundTransparency = 1,
+                        Parent = header,
+                        BackgroundTransparency = 1,
                         Size = UDim2.fromOffset(14, 14),
-                        Position = UDim2.fromOffset(8, 7),
-                        Image = r, ImageColor3 = config.AccentColor,
-                        ScaleType = Enum.ScaleType.Fit, ZIndex = 5,
+                        Position = UDim2.fromOffset(0, 6),
+                        Image = r,
+                        ImageColor3 = config.AccentColor,
+                        ScaleType = Enum.ScaleType.Fit,
+                        ZIndex = 5,
                     })
-                    leftPad = 28
+                    leftPad = 20
                 end
             end
 
             local label = Create("TextLabel", {
-                Parent = header, BackgroundTransparency = 1,
+                Parent = header,
+                BackgroundTransparency = 1,
                 Position = UDim2.fromOffset(leftPad, 0),
-                Size = UDim2.new(1, expandable and -(leftPad + 32) or -(leftPad + 8), 1, 0),
+                Size = UDim2.new(1, expandable and -(leftPad + 28) or -leftPad, 1, 0),
                 Font = config.Font,
                 Text = string.upper(tostring(title or "Section")),
                 TextColor3 = (config._Theme and config._Theme.SectionColor) or config.AccentColor,
@@ -2186,82 +2156,96 @@ function EmoLib:CreateWindow(config)
                 ZIndex = 5,
             })
 
-            local chevron
+            local chevron = nil
             if expandable then
-                -- hard-coded asset so GetIcon can never fail silently
                 chevron = Create("ImageLabel", {
                     Name = "Chevron",
                     Parent = header,
                     BackgroundTransparency = 1,
-                    Size = UDim2.fromOffset(16, 16),
+                    Size = UDim2.fromOffset(14, 14),
                     AnchorPoint = Vector2.new(1, 0.5),
-                    Position = UDim2.new(1, -10, 0.5, 0),
-                    Image = "rbxassetid://10709790948", -- lucide-chevron-down
+                    Position = UDim2.new(1, -2, 0.5, 0),
+                    Image = "rbxassetid://10709790948",
                     ImageColor3 = config.AccentColor,
-                    ImageTransparency = 0,
                     ScaleType = Enum.ScaleType.Fit,
                     Rotation = opened and 0 or -90,
                     ZIndex = 6,
                 })
             end
 
+            -- Track elements that belong to this section (until next section)
             local childFrames = {}
             local isOpen = opened
+            local watching = true
+
+            local function setChildrenVisible(vis)
+                for _, f in ipairs(childFrames) do
+                    if f and f.Parent then
+                        f.Visible = vis
+                    end
+                end
+            end
 
             local function applyOpen(anim)
                 isOpen = true
-                for _, f in ipairs(childFrames) do
-                    if f and f.Parent then f.Visible = true end
-                end
+                setChildrenVisible(true)
                 if chevron then
-                    if anim then Tween(chevron, {Rotation = 0}, 0.18) else chevron.Rotation = 0 end
+                    if anim then
+                        Tween(chevron, {Rotation = 0}, 0.18)
+                    else
+                        chevron.Rotation = 0
+                    end
                 end
-                task.defer(function() RefreshLinkedCorners(page) end)
             end
+
             local function applyClose(anim)
                 isOpen = false
-                for _, f in ipairs(childFrames) do
-                    if f and f.Parent then f.Visible = false end
-                end
+                setChildrenVisible(false)
                 if chevron then
-                    if anim then Tween(chevron, {Rotation = -90}, 0.18) else chevron.Rotation = -90 end
+                    if anim then
+                        Tween(chevron, {Rotation = -90}, 0.18)
+                    else
+                        chevron.Rotation = -90
+                    end
                 end
-                task.defer(function() RefreshLinkedCorners(page) end)
             end
 
             if expandable then
-                header.MouseEnter:Connect(function()
-                    Tween(header, {BackgroundTransparency = 0.25}, 0.12)
-                end)
-                header.MouseLeave:Connect(function()
-                    Tween(header, {BackgroundTransparency = 0.55}, 0.12)
-                end)
                 header.MouseButton1Click:Connect(function()
                     PlayClick()
-                    if isOpen then applyClose(true) else applyOpen(true) end
+                    if isOpen then
+                        applyClose(true)
+                    else
+                        applyOpen(true)
+                    end
                 end)
-                if not opened then
-                    task.defer(function() applyClose(false) end)
-                end
             end
 
-            local watching = true
             local conn
             conn = page.ChildAdded:Connect(function(child)
-                if not watching then return end
-                if child == section then return end
-                if child:GetAttribute("EmoSectionBreak") then
-                    watching = false
-                    pcall(function() conn:Disconnect() end)
-                    return
-                end
-                if child:IsA("GuiObject") and child.Name ~= "UIListLayout" and child.Name ~= "UIPadding" then
-                    table.insert(childFrames, child)
-                    if expandable and not isOpen then
-                        child.Visible = false
+                task.defer(function()
+                    if not watching then return end
+                    if not child or not child.Parent then return end
+                    if child == section then return end
+                    if child:GetAttribute("EmoSectionBreak") then
+                        watching = false
+                        pcall(function() conn:Disconnect() end)
+                        return
                     end
-                end
+                    if child:GetAttribute("EmoElement") then
+                        table.insert(childFrames, child)
+                        if expandable and not isOpen then
+                            child.Visible = false
+                        end
+                    end
+                end)
             end)
+
+            -- If starts closed, hide children that may already exist (none yet) and set chevron
+            if expandable and not opened then
+                isOpen = false
+                if chevron then chevron.Rotation = -90 end
+            end
 
             return {
                 SetText = function(_, t) label.Text = string.upper(tostring(t or "")) end,
@@ -2277,13 +2261,14 @@ function EmoLib:CreateWindow(config)
 
         function Tab:AddLabel(title, subtitle)
             local frame = Create("Frame", {
-                Name = "Label", Parent = page,
+                Name = "Label",
                 BackgroundColor3 = Color3.fromRGB(14, 14, 14),
                 Size = UDim2.new(1, 0, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BorderSizePixel = 0,
             })
             frame:SetAttribute("EmoElement", true)
+            frame.Parent = page
             Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
             Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
             task.defer(function() RefreshLinkedCorners(page) end)
@@ -2431,10 +2416,11 @@ function EmoLib:CreateWindow(config)
             local default = SnapValue(cfg.Default or min, min, max, inc)
 
             local frame = Create("Frame", {
-                Name = "Slider", Parent = page, BackgroundColor3 = Color3.fromRGB(14, 14, 14),
+                Name = "Slider", BackgroundColor3 = Color3.fromRGB(14, 14, 14),
                 Size = UDim2.new(1, 0, 0, 60), BorderSizePixel = 0,
             })
             frame:SetAttribute("EmoElement", true)
+            frame.Parent = page
             Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
             Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
             task.defer(function() RefreshLinkedCorners(page) end)
@@ -3157,7 +3143,7 @@ function EmoLib:CreateWindow(config)
             BorderSizePixel = 0,
             ZIndex = 10,
         })
-        Create("UICorner", { Parent = bar, CornerRadius = UDim.new(1, 0) }) -- pill
+        Create("UICorner", { Parent = bar, CornerRadius = UDim.new(0, 6) }) -- ~0.15 soft radius
         Create("UIStroke", {
             Parent = bar,
             Color = config.AccentColor,
