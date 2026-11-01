@@ -10,12 +10,32 @@ local TextService = game:GetService("TextService")
 local Camera = workspace.CurrentCamera
 
 local EmoLib = {
-    Version = "8.2.0",
+    Version = "8.3.0",
     Windows = {},
+}
+
+local THEMES = {
+    Main = {
+        AccentColor = Color3.fromRGB(180, 30, 30),
+        AccentSoft = Color3.fromRGB(200, 60, 60),
+        AccentBright = Color3.fromRGB(255, 110, 110),
+        TabIdle = Color3.fromRGB(210, 75, 75),
+        SectionColor = Color3.fromRGB(200, 70, 70),
+        ShineTint = Color3.fromRGB(255, 200, 200),
+    },
+    Sec = {
+        AccentColor = Color3.fromRGB(230, 230, 230),
+        AccentSoft = Color3.fromRGB(200, 200, 200),
+        AccentBright = Color3.fromRGB(255, 255, 255),
+        TabIdle = Color3.fromRGB(190, 190, 190),
+        SectionColor = Color3.fromRGB(200, 200, 200),
+        ShineTint = Color3.fromRGB(240, 240, 240),
+    },
 }
 
 local DEFAULTS = {
     HeaderTexture = "rbxassetid://6927295847",
+    Theme = "Main",
     AccentColor = Color3.fromRGB(180, 30, 30),
     BackgroundColor = Color3.fromRGB(12, 12, 12),
     SidebarColor = Color3.fromRGB(8, 8, 8),
@@ -1332,6 +1352,19 @@ function EmoLib:CreateWindow(config)
     for k, v in pairs(DEFAULTS) do
         if config[k] == nil then config[k] = v end
     end
+    -- Theme: "Main" (red, default) | "Sec" (white accent)
+    local themeName = tostring(config.Theme or "Main")
+    if themeName:lower() == "sec" then themeName = "Sec" else themeName = "Main" end
+    config.Theme = themeName
+    local theme = THEMES[themeName] or THEMES.Main
+    -- only override accent-related colors if user did not pass them explicitly
+    if config.AccentColor == DEFAULTS.AccentColor or themeName == "Sec" then
+        -- For Sec always apply white palette for accents; for Main keep defaults unless custom
+        if themeName == "Sec" then
+            config.AccentColor = theme.AccentColor
+        end
+    end
+    config._Theme = theme
 
     local ClickSoundObj = nil
     local function PlayClick()
@@ -1660,7 +1693,7 @@ function EmoLib:CreateWindow(config)
         local btn = Create("ImageButton", {
             Parent = Header, BackgroundTransparency = 1, Size = UDim2.fromOffset(20, 20),
             Position = pos, Image = EmoLib:GetIcon(icon) or "rbxassetid://0",
-            ImageColor3 = Color3.fromRGB(200, 60, 60), ScaleType = Enum.ScaleType.Fit, ZIndex = 4,
+            ImageColor3 = config._Theme and config._Theme.AccentSoft or Color3.fromRGB(200, 60, 60), ScaleType = Enum.ScaleType.Fit, ZIndex = 4,
         })
         btn.MouseEnter:Connect(function() Tween(btn, {ImageColor3 = Color3.fromRGB(255, 90, 90)}, 0.12) end)
         btn.MouseLeave:Connect(function() Tween(btn, {ImageColor3 = Color3.fromRGB(200, 60, 60)}, 0.12) end)
@@ -1812,20 +1845,48 @@ function EmoLib:CreateWindow(config)
     -- list alignment), so rows never stretch: no description = compact row.
     -- rightWidth reserves space on the right for the control; text wraps before it.
     local ROW_MIN, ROW_PAD, ROW_GAP = 38, 10, 2
-    local LINK_GAP = 1          -- gap between glued elements (WindUI-style)
-    local CORNER_R = 5
+    local CORNER_R = 6
+    local GROUP_GAP = 8  -- space between groups / after sections
 
-    -- Apply WindUI-like linked corners to consecutive element frames on a page.
-    -- Section headers break the chain into independent groups.
+    -- WindUI-style linked groups:
+    -- consecutive elements are reparented into one card container (single stroke,
+    -- single outer radius). Inner rows have no stroke and 0 gap, so nothing looks "solto".
     local function RefreshLinkedCorners(page)
         if not page or not page.Parent then return end
+
+        -- Flatten: move any previously grouped children back to page first (keep order)
+        local baseOrder = 0
+        for _, ch in ipairs(page:GetChildren()) do
+            if ch:IsA("Frame") and ch:GetAttribute("EmoGroup") then
+                local kids = {}
+                for _, k in ipairs(ch:GetChildren()) do
+                    if k:IsA("GuiObject") and not k:IsA("UIListLayout") and not k:IsA("UIPadding") and not k:IsA("UICorner") and not k:IsA("UIStroke") then
+                        table.insert(kids, k)
+                    end
+                end
+                table.sort(kids, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+                for i, k in ipairs(kids) do
+                    k.LayoutOrder = baseOrder + i
+                    k.Parent = page
+                end
+                baseOrder = baseOrder + #kids + 1
+                ch:Destroy()
+            else
+                if ch:IsA("GuiObject") and not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then
+                    baseOrder += 1
+                    ch.LayoutOrder = baseOrder
+                end
+            end
+        end
+
         local ordered = {}
         for _, ch in ipairs(page:GetChildren()) do
             if ch:IsA("GuiObject") and not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then
                 table.insert(ordered, ch)
             end
         end
-        -- Build groups split by section breaks
+
+        -- Split into runs of consecutive EmoElement frames (sections break the run)
         local groups = {}
         local current = {}
         local function flush()
@@ -1837,7 +1898,7 @@ function EmoLib:CreateWindow(config)
         for _, ch in ipairs(ordered) do
             if ch:GetAttribute("EmoSectionBreak") then
                 flush()
-            elseif ch.Visible and (ch:GetAttribute("EmoElement") or ch:FindFirstChildOfClass("UIStroke")) then
+            elseif ch:GetAttribute("EmoElement") or (ch:FindFirstChildOfClass("UIStroke") and ch.Name ~= "Section") then
                 ch:SetAttribute("EmoElement", true)
                 table.insert(current, ch)
             else
@@ -1847,34 +1908,49 @@ function EmoLib:CreateWindow(config)
         flush()
 
         for _, group in ipairs(groups) do
-            local n = #group
-            for i, frame in ipairs(group) do
+            if #group < 2 then
+                -- single element: full corner + own stroke
+                local frame = group[1]
                 local corner = frame:FindFirstChildOfClass("UICorner")
-                if not corner then
-                    corner = Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
-                end
-                if n == 1 then
-                    corner.CornerRadius = UDim.new(0, CORNER_R)
-                elseif i == 1 or i == n then
-                    corner.CornerRadius = UDim.new(0, CORNER_R)
-                else
-                    corner.CornerRadius = UDim.new(0, 0)
-                end
-                -- subtle divider line between glued items (not after last)
+                if corner then corner.CornerRadius = UDim.new(0, CORNER_R) end
+                local stroke = frame:FindFirstChildOfClass("UIStroke")
+                if stroke then stroke.Enabled = true; stroke.Transparency = 0.5 end
                 local div = frame:FindFirstChild("_LinkDiv")
-                if i < n then
-                    if not div then
-                        div = Create("Frame", {
-                            Name = "_LinkDiv", Parent = frame,
-                            BackgroundColor3 = Color3.fromRGB(28, 28, 28),
-                            BorderSizePixel = 0, Size = UDim2.new(1, -16, 0, 1),
-                            Position = UDim2.new(0, 8, 1, 0), AnchorPoint = Vector2.new(0, 1),
-                            ZIndex = 5,
-                        })
-                    end
-                    div.Visible = true
-                elseif div then
-                    div.Visible = false
+                if div then div:Destroy() end
+            else
+                -- multi: wrap in one card
+                local first = group[1]
+                local order = first.LayoutOrder
+                local container = Create("Frame", {
+                    Name = "ElementGroup",
+                    Parent = page,
+                    BackgroundColor3 = Color3.fromRGB(14, 14, 14),
+                    BorderSizePixel = 0,
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    LayoutOrder = order,
+                    ZIndex = 2,
+                })
+                container:SetAttribute("EmoGroup", true)
+                Create("UICorner", {Parent = container, CornerRadius = UDim.new(0, CORNER_R)})
+                Create("UIStroke", {
+                    Parent = container, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5,
+                })
+                Create("UIListLayout", {
+                    Parent = container, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 0),
+                })
+
+                for i, frame in ipairs(group) do
+                    -- strip individual card chrome
+                    local stroke = frame:FindFirstChildOfClass("UIStroke")
+                    if stroke then stroke.Enabled = false end
+                    local corner = frame:FindFirstChildOfClass("UICorner")
+                    if corner then corner.CornerRadius = UDim.new(0, 0) end
+                    local div = frame:FindFirstChild("_LinkDiv")
+                    if div then div:Destroy() end
+                    frame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
+                    frame.LayoutOrder = i
+                    frame.Parent = container
                 end
             end
         end
@@ -1967,14 +2043,14 @@ function EmoLib:CreateWindow(config)
         local tabTitle = Create("TextLabel", {
             Name = "Title", Parent = tabBtn, BackgroundTransparency = 1,
             Position = UDim2.fromOffset(34, 0), Size = UDim2.new(1, -42, 1, 0),
-            Font = config.Font, Text = name, TextColor3 = Color3.fromRGB(210, 75, 75),
+            Font = config.Font, Text = name, TextColor3 = (config._Theme and config._Theme.TabIdle) or Color3.fromRGB(210, 75, 75),
             TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 4,
         })
         local page = Create("Frame", {
             Name = name .. "_Page", Parent = ContentScroll, BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 0, 0), Visible = false, AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
         })
-        Create("UIListLayout", {Parent = page, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder})
+        Create("UIListLayout", {Parent = page, Padding = UDim.new(0, GROUP_GAP), SortOrder = Enum.SortOrder.LayoutOrder})
 
         local Tab = {Button = tabBtn, Page = page, Title = tabTitle, Name = name, ScrollPos = Vector2.new(0, 0)}
 
@@ -1985,12 +2061,12 @@ function EmoLib:CreateWindow(config)
                 CurrentTab.ScrollPos = ContentScroll.CanvasPosition
                 CurrentTab.Page.Visible = false
                 Tween(CurrentTab.Button, {BackgroundColor3 = Color3.fromRGB(15, 15, 15)}, 0.15)
-                CurrentTab.Title.TextColor3 = Color3.fromRGB(210, 75, 75)
+                CurrentTab.Title.TextColor3 = (config._Theme and config._Theme.TabIdle) or Color3.fromRGB(210, 75, 75)
             end
             CurrentTab = Tab
             page.Visible = true
-            Tween(tabBtn, {BackgroundColor3 = Color3.fromRGB(32, 12, 12)}, 0.15)
-            tabTitle.TextColor3 = Color3.fromRGB(255, 110, 110)
+            Tween(tabBtn, {BackgroundColor3 = config.Theme == "Sec" and Color3.fromRGB(28, 28, 28) or Color3.fromRGB(32, 12, 12)}, 0.15)
+            tabTitle.TextColor3 = (config._Theme and config._Theme.AccentBright) or Color3.fromRGB(255, 110, 110)
             -- restore this tab's scroll (next frame so layout is ready)
             local restore = Tab.ScrollPos or Vector2.new(0, 0)
             task.defer(function()
@@ -2904,6 +2980,7 @@ function EmoLib:CreateWindow(config)
     end
 
     function Window:Destroy()
+        pcall(function() Window:DestroyStatsPanel() end)
         FadeOutAndDestroy()
     end
 
@@ -2987,6 +3064,186 @@ function EmoLib:CreateWindow(config)
 
     function Window:Notify(cfg)
         return EmoLib:Notify(cfg)
+    end
+
+    -- ========== STATS PANEL (top-center HUD) ==========
+    -- Window:SetStatsPanel(icon, tag, time, fps, ping, country, interval)
+    -- icon     : lucide name / rbxassetid / URL
+    -- tag      : hub name shown on the left
+    -- time     : true/nil = auto HH:MM:SS | function() return "12:34:56" end | string
+    -- fps      : true/nil = auto integer FPS | function() return n end | number
+    -- ping     : true/nil = auto "33MS" | function() return "33MS" end | string/number
+    -- country  : "São Paulo, BR" (string or function)
+    -- interval : refresh rate in seconds (default 0.1)
+    local StatsState = { Gui = nil, Conn = nil, FpsConn = nil, Frames = 0, Fps = 0 }
+
+    local function DestroyStatsPanel()
+        if StatsState.Conn then pcall(function() StatsState.Conn:Disconnect() end) StatsState.Conn = nil end
+        if StatsState.FpsConn then pcall(function() StatsState.FpsConn:Disconnect() end) StatsState.FpsConn = nil end
+        if StatsState.Gui then pcall(function() StatsState.Gui:Destroy() end) StatsState.Gui = nil end
+    end
+
+    function Window:SetStatsPanel(icon, tag, timeArg, fpsArg, pingArg, countryArg, interval)
+        DestroyStatsPanel()
+        if icon == nil and tag == nil then return end
+
+        interval = tonumber(interval) or 0.1
+        tag = tostring(tag or config.Title or "EmoLib")
+        local iconImg = EmoLib:GetIcon(icon) or EmoLib:GetIcon("activity") or "rbxassetid://10709752035"
+
+        local parent = (gethui and gethui()) or CoreGui
+        local gui = Create("ScreenGui", {
+            Name = "EmoLib_StatsPanel", Parent = parent,
+            ResetOnSpawn = false, IgnoreGuiInset = true,
+            DisplayOrder = 2147483645, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+        })
+        StatsState.Gui = gui
+
+        local bar = Create("Frame", {
+            Name = "Bar", Parent = gui,
+            AnchorPoint = Vector2.new(0.5, 0),
+            Position = UDim2.new(0.5, 0, 0, 10),
+            Size = UDim2.fromOffset(0, 34),
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+            BackgroundTransparency = 0.08,
+            BorderSizePixel = 0, ZIndex = 10,
+        })
+        Create("UICorner", {Parent = bar, CornerRadius = UDim.new(0, 8)})
+        Create("UIStroke", {
+            Parent = bar, Color = config.AccentColor, Thickness = 1, Transparency = 0.55,
+        })
+        Create("UIListLayout", {
+            Parent = bar, FillDirection = Enum.FillDirection.Horizontal,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center,
+            Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder,
+        })
+        Create("UIPadding", {
+            Parent = bar,
+            PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+            PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+        })
+        ApplyStudTexture(bar, 0.82, 8)
+
+        local logo = Create("ImageLabel", {
+            Parent = bar, BackgroundTransparency = 1, LayoutOrder = 1,
+            Size = UDim2.fromOffset(18, 18),
+            Image = iconImg, ScaleType = Enum.ScaleType.Fit, ZIndex = 11,
+        })
+        local tagL = Create("TextLabel", {
+            Parent = bar, BackgroundTransparency = 1, LayoutOrder = 2,
+            AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.fromOffset(0, 18),
+            Font = config.Font, Text = tag, TextSize = 13,
+            TextColor3 = config.TextColor, ZIndex = 11,
+        })
+        local function Sep(order)
+            Create("Frame", {
+                Parent = bar, BackgroundColor3 = Color3.fromRGB(50, 50, 50),
+                Size = UDim2.fromOffset(1, 14), BorderSizePixel = 0, LayoutOrder = order, ZIndex = 11,
+            })
+        end
+        local function Stat(order, color)
+            return Create("TextLabel", {
+                Parent = bar, BackgroundTransparency = 1, LayoutOrder = order,
+                AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.fromOffset(0, 18),
+                Font = config.FontRegular, Text = "—", TextSize = 12,
+                TextColor3 = color or config.SubTextColor, ZIndex = 11,
+            })
+        end
+        Sep(3)
+        local timeL = Stat(4, config.TextColor)
+        Sep(5)
+        local fpsL = Stat(6, config.AccentColor)
+        Sep(7)
+        local pingL = Stat(8, config.TextColor)
+        Sep(9)
+        local countryL = Stat(10, config.SubTextColor)
+
+        -- FPS counter
+        StatsState.Frames = 0
+        StatsState.Fps = 0
+        local lastFpsTick = tick()
+        StatsState.FpsConn = RunService.RenderStepped:Connect(function()
+            StatsState.Frames += 1
+            local now = tick()
+            if now - lastFpsTick >= 1 then
+                StatsState.Fps = StatsState.Frames
+                StatsState.Frames = 0
+                lastFpsTick = now
+            end
+        end)
+
+        local function resolve(arg, autoFn)
+            if type(arg) == "function" then
+                local ok, v = pcall(arg)
+                if ok then return v end
+            elseif arg ~= nil and arg ~= true then
+                return arg
+            end
+            return autoFn()
+        end
+
+        local function autoTime()
+            local t = os.date("*t")
+            return string.format("%02d:%02d:%02d", t.hour, t.min, t.sec)
+        end
+        local function autoFps()
+            return tostring(StatsState.Fps)
+        end
+        local function autoPing()
+            local ms = 0
+            pcall(function()
+                local stats = game:GetService("Stats")
+                local item = stats.Network.ServerStatsItem["Data Ping"]
+                if item then
+                    ms = tonumber((item:GetValueString() or ""):match("%d+")) or 0
+                end
+            end)
+            if ms == 0 then
+                pcall(function()
+                    local plr = Players.LocalPlayer
+                    if plr and plr:GetNetworkPing then
+                        ms = math.floor(plr:GetNetworkPing() * 1000)
+                    end
+                end)
+            end
+            return tostring(ms) .. "MS"
+        end
+        local function autoCountry()
+            return "—"
+        end
+
+        local function refresh()
+            if not gui.Parent then return end
+            timeL.Text = tostring(resolve(timeArg, autoTime))
+            fpsL.Text = tostring(resolve(fpsArg, autoFps)) .. " FPS"
+            local p = resolve(pingArg, autoPing)
+            if type(p) == "number" then p = tostring(math.floor(p)) .. "MS" end
+            pingL.Text = tostring(p)
+            countryL.Text = tostring(resolve(countryArg, autoCountry))
+        end
+        refresh()
+        StatsState.Conn = task.spawn(function()
+            while gui and gui.Parent do
+                task.wait(interval)
+                refresh()
+            end
+        end)
+
+        return {
+            Destroy = DestroyStatsPanel,
+            SetTag = function(_, t) tagL.Text = tostring(t or "") end,
+            SetCountry = function(_, c) countryArg = c; countryL.Text = tostring(c or "—") end,
+            SetIcon = function(_, src)
+                local r = EmoLib:GetIcon(src)
+                if r then logo.Image = r end
+            end,
+        }
+    end
+
+    function Window:DestroyStatsPanel()
+        DestroyStatsPanel()
     end
 
     table.insert(EmoLib.Windows, Window)
