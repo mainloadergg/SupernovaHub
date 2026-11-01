@@ -10,7 +10,7 @@ local TextService = game:GetService("TextService")
 local Camera = workspace.CurrentCamera
 
 local EmoLib = {
-    Version = "8.1.0",
+    Version = "8.2.0",
     Windows = {},
 }
 
@@ -1769,7 +1769,7 @@ function EmoLib:CreateWindow(config)
         ScrollingDirection = Enum.ScrollingDirection.Y,
     })
     Create("UIListLayout", {
-        Parent = ContentScroll, Padding = UDim.new(0, 7),
+        Parent = ContentScroll, Padding = UDim.new(0, 6),
         SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center,
     })
     Create("UIPadding", {
@@ -1785,6 +1785,73 @@ function EmoLib:CreateWindow(config)
     -- list alignment), so rows never stretch: no description = compact row.
     -- rightWidth reserves space on the right for the control; text wraps before it.
     local ROW_MIN, ROW_PAD, ROW_GAP = 38, 10, 2
+    local LINK_GAP = 1          -- gap between glued elements (WindUI-style)
+    local CORNER_R = 5
+
+    -- Apply WindUI-like linked corners to consecutive element frames on a page.
+    -- Section headers break the chain into independent groups.
+    local function RefreshLinkedCorners(page)
+        if not page or not page.Parent then return end
+        local ordered = {}
+        for _, ch in ipairs(page:GetChildren()) do
+            if ch:IsA("GuiObject") and not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then
+                table.insert(ordered, ch)
+            end
+        end
+        -- Build groups split by section breaks
+        local groups = {}
+        local current = {}
+        local function flush()
+            if #current > 0 then
+                table.insert(groups, current)
+                current = {}
+            end
+        end
+        for _, ch in ipairs(ordered) do
+            if ch:GetAttribute("EmoSectionBreak") then
+                flush()
+            elseif ch.Visible and (ch:GetAttribute("EmoElement") or ch:FindFirstChildOfClass("UIStroke")) then
+                ch:SetAttribute("EmoElement", true)
+                table.insert(current, ch)
+            else
+                flush()
+            end
+        end
+        flush()
+
+        for _, group in ipairs(groups) do
+            local n = #group
+            for i, frame in ipairs(group) do
+                local corner = frame:FindFirstChildOfClass("UICorner")
+                if not corner then
+                    corner = Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
+                end
+                if n == 1 then
+                    corner.CornerRadius = UDim.new(0, CORNER_R)
+                elseif i == 1 or i == n then
+                    corner.CornerRadius = UDim.new(0, CORNER_R)
+                else
+                    corner.CornerRadius = UDim.new(0, 0)
+                end
+                -- subtle divider line between glued items (not after last)
+                local div = frame:FindFirstChild("_LinkDiv")
+                if i < n then
+                    if not div then
+                        div = Create("Frame", {
+                            Name = "_LinkDiv", Parent = frame,
+                            BackgroundColor3 = Color3.fromRGB(28, 28, 28),
+                            BorderSizePixel = 0, Size = UDim2.new(1, -16, 0, 1),
+                            Position = UDim2.new(0, 8, 1, 0), AnchorPoint = Vector2.new(0, 1),
+                            ZIndex = 5,
+                        })
+                    end
+                    div.Visible = true
+                elseif div then
+                    div.Visible = false
+                end
+            end
+        end
+    end
 
     local function BuildRow(page, name, title, subtitle, rightWidth)
         rightWidth = rightWidth or 0
@@ -1792,8 +1859,10 @@ function EmoLib:CreateWindow(config)
             Name = name, Parent = page, BackgroundColor3 = Color3.fromRGB(14, 14, 14),
             Size = UDim2.new(1, 0, 0, ROW_MIN), BorderSizePixel = 0,
         })
-        Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, 5)})
+        frame:SetAttribute("EmoElement", true)
+        Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
         Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
+        task.defer(function() RefreshLinkedCorners(page) end)
 
         local holder = Create("Frame", {
             Parent = frame, BackgroundTransparency = 1,
@@ -1878,13 +1947,15 @@ function EmoLib:CreateWindow(config)
             Name = name .. "_Page", Parent = ContentScroll, BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 0, 0), Visible = false, AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
         })
-        Create("UIListLayout", {Parent = page, Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder})
+        Create("UIListLayout", {Parent = page, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder})
 
-        local Tab = {Button = tabBtn, Page = page, Title = tabTitle, Name = name}
+        local Tab = {Button = tabBtn, Page = page, Title = tabTitle, Name = name, ScrollPos = Vector2.new(0, 0)}
 
         local function activate()
             PlayClick()
             if CurrentTab then
+                -- save scroll of the tab we're leaving
+                CurrentTab.ScrollPos = ContentScroll.CanvasPosition
                 CurrentTab.Page.Visible = false
                 Tween(CurrentTab.Button, {BackgroundColor3 = Color3.fromRGB(15, 15, 15)}, 0.15)
                 CurrentTab.Title.TextColor3 = Color3.fromRGB(210, 75, 75)
@@ -1893,6 +1964,13 @@ function EmoLib:CreateWindow(config)
             page.Visible = true
             Tween(tabBtn, {BackgroundColor3 = Color3.fromRGB(32, 12, 12)}, 0.15)
             tabTitle.TextColor3 = Color3.fromRGB(255, 110, 110)
+            -- restore this tab's scroll (next frame so layout is ready)
+            local restore = Tab.ScrollPos or Vector2.new(0, 0)
+            task.defer(function()
+                if CurrentTab == Tab then
+                    ContentScroll.CanvasPosition = restore
+                end
+            end)
         end
         tabBtn.MouseButton1Click:Connect(activate)
         tabBtn.MouseEnter:Connect(function()
@@ -1904,24 +1982,156 @@ function EmoLib:CreateWindow(config)
         table.insert(Tabs, Tab)
         if #Tabs == 1 then task.defer(activate) end
 
-        function Tab:AddSection(text, icon)
-            local section = Create("Frame", {Name = "Section", Parent = page, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24)})
+        function Tab:AddSection(cfg)
+            -- API: AddSection("Title") | AddSection("Title", "icon") | AddSection({ Title=, Icon=, Opened= })
+            -- Opened present (true/false) => show chevron and allow collapse. Absent => always open, no button.
+            local title, icon, opened, expandable
+            if type(cfg) == "table" then
+                title = cfg.Title or cfg.Text or "Section"
+                icon = cfg.Icon
+                if cfg.Opened ~= nil then
+                    expandable = true
+                    opened = cfg.Opened and true or false
+                else
+                    expandable = false
+                    opened = true
+                end
+            else
+                title = tostring(cfg or "Section")
+                icon = nil
+                expandable = false
+                opened = true
+            end
+
+            local HEADER_H = 26
+            local section = Create("Frame", {
+                Name = "Section", Parent = page, BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, HEADER_H), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
+            })
+            -- mark as section break for linked-corner groups
+            section:SetAttribute("EmoSectionBreak", true)
+
+            local header = Create("TextButton", {
+                Name = "Header", Parent = section, BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, HEADER_H), Text = "", AutoButtonColor = false, ZIndex = 3,
+            })
+
+            local leftPad = 0
             if icon then
                 local r = EmoLib:GetIcon(icon)
                 if r then
                     Create("ImageLabel", {
-                        Parent = section, BackgroundTransparency = 1, Size = UDim2.fromOffset(15, 15),
-                        Position = UDim2.fromOffset(0, 4), Image = r, ImageColor3 = config.AccentColor,
+                        Parent = header, BackgroundTransparency = 1, Size = UDim2.fromOffset(15, 15),
+                        Position = UDim2.fromOffset(0, 5), Image = r, ImageColor3 = config.AccentColor, ZIndex = 4,
                     })
+                    leftPad = 20
                 end
             end
+
             local label = Create("TextLabel", {
-                Parent = section, BackgroundTransparency = 1,
-                Position = UDim2.fromOffset(icon and 20 or 0, 0), Size = UDim2.new(1, icon and -20 or 0, 1, 0),
-                Font = config.Font, Text = text or "Section", TextColor3 = Color3.fromRGB(180, 50, 50),
-                TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = header, BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(leftPad, 0),
+                Size = UDim2.new(1, leftPad > 0 and -(leftPad + 28) or -28, 1, 0),
+                Font = config.Font, Text = string.upper(tostring(title or "Section")),
+                TextColor3 = Color3.fromRGB(180, 50, 50), TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 4,
             })
-            return {SetText = function(_, t) label.Text = t end}
+
+            local chevron
+            if expandable then
+                chevron = Create("ImageLabel", {
+                    Parent = header, BackgroundTransparency = 1,
+                    Size = UDim2.fromOffset(14, 14),
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -2, 0.5, 0),
+                    Image = EmoLib:GetIcon("chevron-down") or "rbxassetid://10709790948",
+                    ImageColor3 = Color3.fromRGB(180, 60, 60),
+                    Rotation = opened and 0 or -90, ZIndex = 4,
+                })
+            end
+
+            -- Content holder for child elements of this section (optional container)
+            -- For simplicity, section only toggles visibility of elements until next section
+            -- via a Content frame that scripts can parent into; but existing API parents to page.
+            -- We use a Content frame and re-parent subsequent elements? Too invasive.
+            -- Instead: section returns methods Open/Close; content is elements added after until next section
+            -- tracked in a list. Collapsing hides those frames.
+
+            local childFrames = {}
+            local isOpen = opened
+
+            local function applyOpen(anim)
+                isOpen = true
+                for _, f in ipairs(childFrames) do
+                    if f and f.Parent then f.Visible = true end
+                end
+                if chevron then
+                    if anim then Tween(chevron, {Rotation = 0}, 0.18) else chevron.Rotation = 0 end
+                end
+                task.defer(function() RefreshLinkedCorners(page) end)
+            end
+            local function applyClose(anim)
+                isOpen = false
+                for _, f in ipairs(childFrames) do
+                    if f and f.Parent then f.Visible = false end
+                end
+                if chevron then
+                    if anim then Tween(chevron, {Rotation = -90}, 0.18) else chevron.Rotation = -90 end
+                end
+                task.defer(function() RefreshLinkedCorners(page) end)
+            end
+
+            if expandable then
+                header.MouseButton1Click:Connect(function()
+                    PlayClick()
+                    if isOpen then applyClose(true) else applyOpen(true) end
+                end)
+                if not opened then
+                    task.defer(function() applyClose(false) end)
+                end
+            end
+
+            -- Hook: when new element frames are added to page after this section, register them
+            -- until next section break. Use ChildAdded on page.
+            local watching = true
+            local conn
+            conn = page.ChildAdded:Connect(function(child)
+                if not watching then return end
+                if child == section then return end
+                if child:GetAttribute("EmoSectionBreak") then
+                    -- next section starts; stop tracking
+                    watching = false
+                    pcall(function() conn:Disconnect() end)
+                    return
+                end
+                -- only track element-like frames (not layouts)
+                if child:IsA("GuiObject") and child.Name ~= "UIListLayout" and child.Name ~= "UIPadding" then
+                    table.insert(childFrames, child)
+                    if expandable and not isOpen then
+                        child.Visible = false
+                    end
+                end
+            end)
+
+            return {
+                SetText = function(_, t) label.Text = string.upper(tostring(t or "")) end,
+                SetTitle = function(_, t) label.Text = string.upper(tostring(t or "")) end,
+                Open = function() applyOpen(true) end,
+                Close = function() applyClose(true) end,
+                Toggle = function()
+                    if isOpen then applyClose(true) else applyOpen(true) end
+                end,
+                IsOpen = function() return isOpen end,
+            }
+        end
+
+        -- Compatibility wrapper so AddSection("Title", "icon") still works
+        local _AddSection = Tab.AddSection
+        function Tab:AddSection(a, b)
+            if type(a) == "table" then
+                return _AddSection(self, a)
+            end
+            return _AddSection(self, { Title = a, Icon = b })
         end
 
         function Tab:AddLabel(title, subtitle)
@@ -1932,8 +2142,10 @@ function EmoLib:CreateWindow(config)
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BorderSizePixel = 0,
             })
-            Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, 5)})
+            frame:SetAttribute("EmoElement", true)
+            Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
             Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
+            task.defer(function() RefreshLinkedCorners(page) end)
 
             local holder = Create("Frame", {
                 Parent = frame, BackgroundTransparency = 1,
@@ -2081,8 +2293,10 @@ function EmoLib:CreateWindow(config)
                 Name = "Slider", Parent = page, BackgroundColor3 = Color3.fromRGB(14, 14, 14),
                 Size = UDim2.new(1, 0, 0, 60), BorderSizePixel = 0,
             })
-            Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, 5)})
+            frame:SetAttribute("EmoElement", true)
+            Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
             Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
+            task.defer(function() RefreshLinkedCorners(page) end)
 
             local titleL = Create("TextLabel", {
                 Parent = frame, BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 10), Size = UDim2.new(1, -78, 0, 16),
@@ -2322,7 +2536,7 @@ function EmoLib:CreateWindow(config)
                 ImageColor3 = Color3.fromRGB(180, 60, 60),
             })
 
-            local MODAL_W, MODAL_H = 340, 400
+            local MODAL_W, MODAL_H = 300, 360
             local ModalRoot = Create("TextButton", {
                 Name = "DropdownModal", Parent = ScreenGui, Size = UDim2.fromScale(1, 1),
                 BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 1,
@@ -2331,59 +2545,81 @@ function EmoLib:CreateWindow(config)
             local ModalPanel = Create("Frame", {
                 Parent = ModalRoot, AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(MODAL_W, MODAL_H),
-                BackgroundColor3 = Color3.fromRGB(16, 16, 16), BackgroundTransparency = 0.05,
+                BackgroundColor3 = Color3.fromRGB(12, 12, 12), BackgroundTransparency = 0,
                 ZIndex = 301, ClipsDescendants = true,
             })
-            Create("UICorner", {Parent = ModalPanel, CornerRadius = UDim.new(0, 6)})
-            local mStroke = Create("UIStroke", {Parent = ModalPanel, Color = config.AccentColor, Thickness = 1.2, Transparency = 0.35})
-            ApplyStudTexture(ModalPanel, 0.72, 6)
+            Create("UICorner", {Parent = ModalPanel, CornerRadius = UDim.new(0, 8)})
+            local mStroke = Create("UIStroke", {Parent = ModalPanel, Color = Color3.fromRGB(40, 40, 40), Thickness = 1, Transparency = 0.2})
+            ApplyStudTexture(ModalPanel, 0.78, 8)
 
+            -- header bar
+            local modalHeader = Create("Frame", {
+                Parent = ModalPanel, BackgroundColor3 = Color3.fromRGB(16, 16, 16),
+                Size = UDim2.new(1, 0, 0, 44), BorderSizePixel = 0, ZIndex = 302,
+            })
+            Create("UICorner", {Parent = modalHeader, CornerRadius = UDim.new(0, 8)})
+            -- mask bottom corners of header
+            Create("Frame", {
+                Parent = modalHeader, BackgroundColor3 = Color3.fromRGB(16, 16, 16),
+                Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12),
+                BorderSizePixel = 0, ZIndex = 302,
+            })
             Create("TextLabel", {
-                Parent = ModalPanel, Text = title, Font = config.Font, TextSize = 15, TextColor3 = config.TextColor,
+                Parent = modalHeader, Text = title, Font = config.Font, TextSize = 14, TextColor3 = config.TextColor,
                 TextXAlignment = Enum.TextXAlignment.Left, BackgroundTransparency = 1,
-                Size = UDim2.new(1, -52, 0, 48), Position = UDim2.fromOffset(16, 0), ZIndex = 303,
+                Size = UDim2.new(1, -48, 1, 0), Position = UDim2.fromOffset(16, 0), ZIndex = 303,
             })
             local ModalClose = Create("ImageButton", {
-                Parent = ModalPanel, Image = EmoLib:GetIcon("x") or "rbxassetid://10747384394",
-                Size = UDim2.fromOffset(16, 16), Position = UDim2.new(1, -28, 0, 24),
+                Parent = modalHeader, Image = EmoLib:GetIcon("x") or "rbxassetid://10747384394",
+                Size = UDim2.fromOffset(16, 16), Position = UDim2.new(1, -28, 0.5, 0),
                 AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1,
-                ImageColor3 = config.SubTextColor, ZIndex = 303,
+                ImageColor3 = Color3.fromRGB(160, 70, 70), ZIndex = 303,
             })
+            ModalClose.MouseEnter:Connect(function()
+                Tween(ModalClose, {ImageColor3 = Color3.fromRGB(255, 100, 100)}, 0.12)
+            end)
+            ModalClose.MouseLeave:Connect(function()
+                Tween(ModalClose, {ImageColor3 = Color3.fromRGB(160, 70, 70)}, 0.12)
+            end)
+
+            -- subtle divider under header
             Create("Frame", {
-                Parent = ModalPanel, Size = UDim2.new(1, -24, 0, 1), Position = UDim2.new(0.5, 0, 0, 48),
-                AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(55, 55, 55),
-                BackgroundTransparency = 0.4, BorderSizePixel = 0, ZIndex = 302,
+                Parent = ModalPanel, Size = UDim2.new(1, 0, 0, 1), Position = UDim2.fromOffset(0, 44),
+                BackgroundColor3 = Color3.fromRGB(45, 20, 20), BorderSizePixel = 0, ZIndex = 303,
             })
 
             local DropdownScroll = Create("ScrollingFrame", {
-                Parent = ModalPanel, Size = UDim2.new(1, -12, 1, multi and -104 or -60),
-                Position = UDim2.fromOffset(6, 54), BackgroundTransparency = 1, BorderSizePixel = 0,
-                ScrollBarThickness = 5, ScrollBarImageColor3 = config.AccentColor,
+                Parent = ModalPanel, Size = UDim2.new(1, -16, 1, multi and -100 or -56),
+                Position = UDim2.fromOffset(8, 50), BackgroundTransparency = 1, BorderSizePixel = 0,
+                ScrollBarThickness = 3, ScrollBarImageColor3 = config.AccentColor,
                 CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y, ZIndex = 302,
                 ElasticBehavior = Enum.ElasticBehavior.Never,
                 ScrollingDirection = Enum.ScrollingDirection.Y,
             })
-            Create("UIListLayout", {Parent = DropdownScroll, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4)})
+            Create("UIListLayout", {Parent = DropdownScroll, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3)})
             Create("UIPadding", {
-                Parent = DropdownScroll, PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 8),
-                PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+                Parent = DropdownScroll, PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 6),
+                PaddingLeft = UDim.new(0, 2), PaddingRight = UDim.new(0, 2),
             })
 
-            -- Confirm button (multi): same look as the option rows, black, red text, no accent border
             local confirmBtn
             if multi then
                 confirmBtn = Create("TextButton", {
-                    Parent = ModalPanel, Size = UDim2.new(1, -20, 0, 34), Position = UDim2.new(0, 10, 1, -44),
-                    BackgroundColor3 = Color3.fromRGB(8, 8, 8), BorderSizePixel = 0,
-                    Text = "Confirm", Font = config.Font, TextSize = 13, TextColor3 = Color3.fromRGB(220, 70, 70),
+                    Parent = ModalPanel, Size = UDim2.new(1, -20, 0, 36), Position = UDim2.new(0, 10, 1, -46),
+                    BackgroundColor3 = config.AccentColor, BorderSizePixel = 0,
+                    Text = "Confirm", Font = config.Font, TextSize = 13, TextColor3 = Color3.fromRGB(255, 255, 255),
                     AutoButtonColor = false, ZIndex = 303,
                 })
-                Create("UICorner", {Parent = confirmBtn, CornerRadius = UDim.new(0, 5)})
+                Create("UICorner", {Parent = confirmBtn, CornerRadius = UDim.new(0, 6)})
                 confirmBtn.MouseEnter:Connect(function()
-                    Tween(confirmBtn, {BackgroundColor3 = Color3.fromRGB(20, 12, 12)}, 0.12)
+                    Tween(confirmBtn, {BackgroundColor3 = Color3.fromRGB(
+                        math.min(255, config.AccentColor.R * 255 + 20),
+                        math.min(255, config.AccentColor.G * 255 + 10),
+                        math.min(255, config.AccentColor.B * 255 + 10)
+                    )}, 0.12)
                 end)
                 confirmBtn.MouseLeave:Connect(function()
-                    Tween(confirmBtn, {BackgroundColor3 = Color3.fromRGB(8, 8, 8)}, 0.12)
+                    Tween(confirmBtn, {BackgroundColor3 = config.AccentColor}, 0.12)
                 end)
             end
 
@@ -2447,10 +2683,16 @@ function EmoLib:CreateWindow(config)
 
                     local optBtn = Create("TextButton", {
                         Parent = DropdownScroll,
-                        BackgroundColor3 = isOn and Color3.fromRGB(45, 18, 18) or Color3.fromRGB(24, 24, 24),
-                        Size = UDim2.new(1, 0, 0, 34), Text = "", AutoButtonColor = false, ZIndex = 303, BorderSizePixel = 0,
+                        BackgroundColor3 = isOn and Color3.fromRGB(36, 14, 14) or Color3.fromRGB(18, 18, 18),
+                        Size = UDim2.new(1, 0, 0, 36), Text = "", AutoButtonColor = false, ZIndex = 303, BorderSizePixel = 0,
                     })
-                    Create("UICorner", {Parent = optBtn, CornerRadius = UDim.new(0, 5)})
+                    Create("UICorner", {Parent = optBtn, CornerRadius = UDim.new(0, 6)})
+                    local optStroke = Create("UIStroke", {
+                        Parent = optBtn,
+                        Color = isOn and config.AccentColor or Color3.fromRGB(32, 32, 32),
+                        Thickness = 1, Transparency = isOn and 0.45 or 0.5,
+                    })
+                    optBtn:SetAttribute("EmoOptStroke", true)
 
                     local leftOffset = 12
                     if icon then
@@ -2482,23 +2724,34 @@ function EmoLib:CreateWindow(config)
                         if multi then
                             if selected[name] then
                                 selected[name] = nil
-                                Tween(optBtn, {BackgroundColor3 = Color3.fromRGB(24, 24, 24)}, 0.12)
+                                Tween(optBtn, {BackgroundColor3 = Color3.fromRGB(18, 18, 18)}, 0.12)
                                 Tween(check, {ImageTransparency = 1}, 0.12)
+                                local st = optBtn:FindFirstChildOfClass("UIStroke")
+                                if st then Tween(st, {Color = Color3.fromRGB(32, 32, 32), Transparency = 0.5}, 0.12) end
                             else
                                 local count = 0
                                 for _ in pairs(selected) do count += 1 end
                                 if count >= multiMax then return end
                                 selected[name] = true
-                                Tween(optBtn, {BackgroundColor3 = Color3.fromRGB(45, 18, 18)}, 0.12)
+                                Tween(optBtn, {BackgroundColor3 = Color3.fromRGB(36, 14, 14)}, 0.12)
                                 Tween(check, {ImageTransparency = 0}, 0.12)
+                                local st = optBtn:FindFirstChildOfClass("UIStroke")
+                                if st then Tween(st, {Color = config.AccentColor, Transparency = 0.45}, 0.12) end
                             end
                             valueText.Text = GetDisplayText()
                         else
                             selected = name
                             for n, data in pairs(optButtons) do
                                 local on = (n == name)
-                                Tween(data.Btn, {BackgroundColor3 = on and Color3.fromRGB(45, 18, 18) or Color3.fromRGB(24, 24, 24)}, 0.12)
+                                Tween(data.Btn, {BackgroundColor3 = on and Color3.fromRGB(36, 14, 14) or Color3.fromRGB(18, 18, 18)}, 0.12)
                                 Tween(data.Check, {ImageTransparency = on and 0 or 1}, 0.12)
+                                local st = data.Btn:FindFirstChildOfClass("UIStroke")
+                                if st then
+                                    Tween(st, {
+                                        Color = on and config.AccentColor or Color3.fromRGB(32, 32, 32),
+                                        Transparency = on and 0.45 or 0.5,
+                                    }, 0.12)
+                                end
                             end
                             if callback then callback(name) end
                             CloseModal()
@@ -2536,8 +2789,13 @@ function EmoLib:CreateWindow(config)
                     end
                     for n, data in pairs(optButtons) do
                         local on = multi and (selected[n] == true) or (selected == n)
-                        data.Btn.BackgroundColor3 = on and Color3.fromRGB(45, 18, 18) or Color3.fromRGB(24, 24, 24)
+                        data.Btn.BackgroundColor3 = on and Color3.fromRGB(36, 14, 14) or Color3.fromRGB(18, 18, 18)
                         data.Check.ImageTransparency = on and 0 or 1
+                        local st = data.Btn:FindFirstChildOfClass("UIStroke")
+                        if st then
+                            st.Color = on and config.AccentColor or Color3.fromRGB(32, 32, 32)
+                            st.Transparency = on and 0.45 or 0.5
+                        end
                     end
                     valueText.Text = GetDisplayText()
                 end,
@@ -2637,9 +2895,7 @@ function EmoLib:CreateWindow(config)
         FloatingIcon.BackgroundTransparency = 1
         FloatStroke.Transparency = 1
     end
-    if config.ReflectanceEffect then
-        task.defer(function() MakeShine(FloatingIcon, FLOAT_CORNER, "strong", true) end)
-    end
+    -- Reflectance intentionally disabled on floating icon
 
     local function LoadFloatPos()
         pcall(function()
