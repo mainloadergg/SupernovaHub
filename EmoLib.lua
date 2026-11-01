@@ -2009,80 +2009,106 @@ function EmoLib:CreateWindow(config)
         table.insert(Tabs, Tab)
         if #Tabs == 1 then task.defer(activate) end
 
-        function Tab:AddSection(cfg)
-            -- API: AddSection("Title") | AddSection("Title", "icon") | AddSection({ Title=, Icon=, Opened= })
-            -- Opened present (true/false) => show chevron and allow collapse. Absent => always open, no button.
+        function Tab:AddSection(a, b, c)
+            -- API:
+            --   AddSection("Title")
+            --   AddSection("Title", "icon")
+            --   AddSection("Title", true / false)              -- chevron, Opened
+            --   AddSection("Title", "icon", true / false)
+            --   AddSection({ Title=, Icon=, Opened= })
             local title, icon, opened, expandable
-            if type(cfg) == "table" then
-                title = cfg.Title or cfg.Text or "Section"
-                icon = cfg.Icon
-                if cfg.Opened ~= nil then
+            if type(a) == "table" then
+                title = a.Title or a.Text or "Section"
+                icon = a.Icon
+                if a.Opened ~= nil then
                     expandable = true
-                    opened = cfg.Opened and true or false
+                    opened = a.Opened and true or false
                 else
                     expandable = false
                     opened = true
                 end
             else
-                title = tostring(cfg or "Section")
-                icon = nil
-                expandable = false
-                opened = true
+                title = tostring(a or "Section")
+                if type(b) == "boolean" then
+                    icon = nil
+                    expandable = true
+                    opened = b
+                elseif type(b) == "string" then
+                    icon = b
+                    if type(c) == "boolean" then
+                        expandable = true
+                        opened = c
+                    else
+                        expandable = false
+                        opened = true
+                    end
+                else
+                    icon = nil
+                    expandable = false
+                    opened = true
+                end
             end
 
-            local HEADER_H = 26
+            local HEADER_H = 28
             local section = Create("Frame", {
                 Name = "Section", Parent = page, BackgroundTransparency = 1,
                 Size = UDim2.new(1, 0, 0, HEADER_H), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
             })
-            -- mark as section break for linked-corner groups
             section:SetAttribute("EmoSectionBreak", true)
 
             local header = Create("TextButton", {
-                Name = "Header", Parent = section, BackgroundTransparency = 1,
+                Name = "Header", Parent = section,
+                BackgroundColor3 = Color3.fromRGB(18, 18, 18),
+                BackgroundTransparency = expandable and 0.55 or 1,
                 Size = UDim2.new(1, 0, 0, HEADER_H), Text = "", AutoButtonColor = false, ZIndex = 3,
             })
+            Create("UICorner", {Parent = header, CornerRadius = UDim.new(0, 4)})
 
-            local leftPad = 0
+            local leftPad = 8
             if icon then
                 local r = EmoLib:GetIcon(icon)
                 if r then
                     Create("ImageLabel", {
-                        Parent = header, BackgroundTransparency = 1, Size = UDim2.fromOffset(15, 15),
-                        Position = UDim2.fromOffset(0, 5), Image = r, ImageColor3 = config.AccentColor, ZIndex = 4,
+                        Parent = header, BackgroundTransparency = 1,
+                        Size = UDim2.fromOffset(14, 14),
+                        Position = UDim2.fromOffset(8, 7),
+                        Image = r, ImageColor3 = config.AccentColor,
+                        ScaleType = Enum.ScaleType.Fit, ZIndex = 5,
                     })
-                    leftPad = 20
+                    leftPad = 28
                 end
             end
 
             local label = Create("TextLabel", {
                 Parent = header, BackgroundTransparency = 1,
                 Position = UDim2.fromOffset(leftPad, 0),
-                Size = UDim2.new(1, leftPad > 0 and -(leftPad + 28) or -28, 1, 0),
-                Font = config.Font, Text = string.upper(tostring(title or "Section")),
-                TextColor3 = Color3.fromRGB(180, 50, 50), TextSize = 12,
-                TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 4,
+                Size = UDim2.new(1, expandable and -(leftPad + 32) or -(leftPad + 8), 1, 0),
+                Font = config.Font,
+                Text = string.upper(tostring(title or "Section")),
+                TextColor3 = Color3.fromRGB(200, 70, 70),
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 5,
             })
 
             local chevron
             if expandable then
+                -- hard-coded asset so GetIcon can never fail silently
                 chevron = Create("ImageLabel", {
-                    Parent = header, BackgroundTransparency = 1,
-                    Size = UDim2.fromOffset(14, 14),
+                    Name = "Chevron",
+                    Parent = header,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.fromOffset(16, 16),
                     AnchorPoint = Vector2.new(1, 0.5),
-                    Position = UDim2.new(1, -2, 0.5, 0),
-                    Image = EmoLib:GetIcon("chevron-down") or "rbxassetid://10709790948",
-                    ImageColor3 = Color3.fromRGB(180, 60, 60),
-                    Rotation = opened and 0 or -90, ZIndex = 4,
+                    Position = UDim2.new(1, -10, 0.5, 0),
+                    Image = "rbxassetid://10709790948", -- lucide-chevron-down
+                    ImageColor3 = Color3.fromRGB(220, 90, 90),
+                    ImageTransparency = 0,
+                    ScaleType = Enum.ScaleType.Fit,
+                    Rotation = opened and 0 or -90,
+                    ZIndex = 6,
                 })
             end
-
-            -- Content holder for child elements of this section (optional container)
-            -- For simplicity, section only toggles visibility of elements until next section
-            -- via a Content frame that scripts can parent into; but existing API parents to page.
-            -- We use a Content frame and re-parent subsequent elements? Too invasive.
-            -- Instead: section returns methods Open/Close; content is elements added after until next section
-            -- tracked in a list. Collapsing hides those frames.
 
             local childFrames = {}
             local isOpen = opened
@@ -2109,6 +2135,12 @@ function EmoLib:CreateWindow(config)
             end
 
             if expandable then
+                header.MouseEnter:Connect(function()
+                    Tween(header, {BackgroundTransparency = 0.25}, 0.12)
+                end)
+                header.MouseLeave:Connect(function()
+                    Tween(header, {BackgroundTransparency = 0.55}, 0.12)
+                end)
                 header.MouseButton1Click:Connect(function()
                     PlayClick()
                     if isOpen then applyClose(true) else applyOpen(true) end
@@ -2118,20 +2150,16 @@ function EmoLib:CreateWindow(config)
                 end
             end
 
-            -- Hook: when new element frames are added to page after this section, register them
-            -- until next section break. Use ChildAdded on page.
             local watching = true
             local conn
             conn = page.ChildAdded:Connect(function(child)
                 if not watching then return end
                 if child == section then return end
                 if child:GetAttribute("EmoSectionBreak") then
-                    -- next section starts; stop tracking
                     watching = false
                     pcall(function() conn:Disconnect() end)
                     return
                 end
-                -- only track element-like frames (not layouts)
                 if child:IsA("GuiObject") and child.Name ~= "UIListLayout" and child.Name ~= "UIPadding" then
                     table.insert(childFrames, child)
                     if expandable and not isOpen then
@@ -2150,31 +2178,6 @@ function EmoLib:CreateWindow(config)
                 end,
                 IsOpen = function() return isOpen end,
             }
-        end
-
-        -- Flexible API:
-        --   AddSection("Title")
-        --   AddSection("Title", "icon")
-        --   AddSection("Title", true)            -- Opened = true (chevron)
-        --   AddSection("Title", false)           -- Opened = false (chevron, starts closed)
-        --   AddSection("Title", "icon", true)
-        --   AddSection("Title", "icon", false)
-        --   AddSection({ Title=, Icon=, Opened= })
-        local _AddSection = Tab.AddSection
-        function Tab:AddSection(a, b, c)
-            if type(a) == "table" then
-                return _AddSection(self, a)
-            end
-            local cfg = { Title = a }
-            if type(b) == "boolean" then
-                cfg.Opened = b
-            elseif type(b) == "string" then
-                cfg.Icon = b
-                if type(c) == "boolean" then
-                    cfg.Opened = c
-                end
-            end
-            return _AddSection(self, cfg)
         end
 
         function Tab:AddLabel(title, subtitle)
