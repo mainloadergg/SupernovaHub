@@ -2980,7 +2980,11 @@ function EmoLib:CreateWindow(config)
     end
 
     function Window:Destroy()
-        pcall(function() Window:DestroyStatsPanel() end)
+        pcall(function()
+            if Window.DestroyStatsPanel then
+                Window:DestroyStatsPanel()
+            end
+        end)
         FadeOutAndDestroy()
     end
 
@@ -3067,105 +3071,154 @@ function EmoLib:CreateWindow(config)
     end
 
     -- ========== STATS PANEL (top-center HUD) ==========
-    -- Window:SetStatsPanel(icon, tag, time, fps, ping, country, interval)
-    -- icon     : lucide name / rbxassetid / URL
-    -- tag      : hub name shown on the left
-    -- time     : true/nil = auto HH:MM:SS | function() return "12:34:56" end | string
-    -- fps      : true/nil = auto integer FPS | function() return n end | number
-    -- ping     : true/nil = auto "33MS" | function() return "33MS" end | string/number
-    -- country  : "São Paulo, BR" (string or function)
-    -- interval : refresh rate in seconds (default 0.1)
-    local StatsState = { Gui = nil, Conn = nil, FpsConn = nil, Frames = 0, Fps = 0 }
+    local StatsState = {
+        Gui = nil,
+        Running = false,
+        FpsConn = nil,
+        Frames = 0,
+        Fps = 0,
+    }
 
     local function DestroyStatsPanel()
-        if StatsState.Conn then pcall(function() StatsState.Conn:Disconnect() end) StatsState.Conn = nil end
-        if StatsState.FpsConn then pcall(function() StatsState.FpsConn:Disconnect() end) StatsState.FpsConn = nil end
-        if StatsState.Gui then pcall(function() StatsState.Gui:Destroy() end) StatsState.Gui = nil end
+        StatsState.Running = false
+        if StatsState.FpsConn then
+            pcall(function() StatsState.FpsConn:Disconnect() end)
+            StatsState.FpsConn = nil
+        end
+        if StatsState.Gui then
+            pcall(function() StatsState.Gui:Destroy() end)
+            StatsState.Gui = nil
+        end
+    end
+
+    function Window:DestroyStatsPanel()
+        DestroyStatsPanel()
     end
 
     function Window:SetStatsPanel(icon, tag, timeArg, fpsArg, pingArg, countryArg, interval)
         DestroyStatsPanel()
-        if icon == nil and tag == nil then return end
+        if icon == nil and tag == nil then
+            return nil
+        end
 
         interval = tonumber(interval) or 0.1
+        if interval < 0.05 then interval = 0.05 end
         tag = tostring(tag or config.Title or "EmoLib")
-        local iconImg = EmoLib:GetIcon(icon) or EmoLib:GetIcon("activity") or "rbxassetid://10709752035"
+        local iconImg = EmoLib:GetIcon(icon) or "rbxassetid://10709752035"
 
-        local parent = (gethui and gethui()) or CoreGui
+        local parent = CoreGui
+        pcall(function()
+            if gethui then parent = gethui() end
+        end)
+
         local gui = Create("ScreenGui", {
-            Name = "EmoLib_StatsPanel", Parent = parent,
-            ResetOnSpawn = false, IgnoreGuiInset = true,
-            DisplayOrder = 2147483645, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+            Name = "EmoLib_StatsPanel",
+            Parent = parent,
+            ResetOnSpawn = false,
+            IgnoreGuiInset = true,
+            DisplayOrder = 2147483645,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         })
         StatsState.Gui = gui
+        StatsState.Running = true
+        StatsState.Frames = 0
+        StatsState.Fps = 0
 
         local bar = Create("Frame", {
-            Name = "Bar", Parent = gui,
+            Name = "Bar",
+            Parent = gui,
             AnchorPoint = Vector2.new(0.5, 0),
             Position = UDim2.new(0.5, 0, 0, 10),
             Size = UDim2.fromOffset(0, 34),
             AutomaticSize = Enum.AutomaticSize.X,
             BackgroundColor3 = Color3.fromRGB(12, 12, 12),
             BackgroundTransparency = 0.08,
-            BorderSizePixel = 0, ZIndex = 10,
+            BorderSizePixel = 0,
+            ZIndex = 10,
         })
-        Create("UICorner", {Parent = bar, CornerRadius = UDim.new(0, 8)})
+        Create("UICorner", { Parent = bar, CornerRadius = UDim.new(0, 8) })
         Create("UIStroke", {
-            Parent = bar, Color = config.AccentColor, Thickness = 1, Transparency = 0.55,
+            Parent = bar,
+            Color = config.AccentColor,
+            Thickness = 1,
+            Transparency = 0.55,
         })
         Create("UIListLayout", {
-            Parent = bar, FillDirection = Enum.FillDirection.Horizontal,
+            Parent = bar,
+            FillDirection = Enum.FillDirection.Horizontal,
             VerticalAlignment = Enum.VerticalAlignment.Center,
             HorizontalAlignment = Enum.HorizontalAlignment.Center,
-            Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 10),
+            SortOrder = Enum.SortOrder.LayoutOrder,
         })
         Create("UIPadding", {
             Parent = bar,
-            PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
-            PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+            PaddingLeft = UDim.new(0, 12),
+            PaddingRight = UDim.new(0, 12),
+            PaddingTop = UDim.new(0, 4),
+            PaddingBottom = UDim.new(0, 4),
         })
-        ApplyStudTexture(bar, 0.82, 8)
+        pcall(function() ApplyStudTexture(bar, 0.82, 8) end)
 
-        local logo = Create("ImageLabel", {
-            Parent = bar, BackgroundTransparency = 1, LayoutOrder = 1,
+        Create("ImageLabel", {
+            Parent = bar,
+            BackgroundTransparency = 1,
+            LayoutOrder = 1,
             Size = UDim2.fromOffset(18, 18),
-            Image = iconImg, ScaleType = Enum.ScaleType.Fit, ZIndex = 11,
+            Image = iconImg,
+            ScaleType = Enum.ScaleType.Fit,
+            ZIndex = 11,
         })
         local tagL = Create("TextLabel", {
-            Parent = bar, BackgroundTransparency = 1, LayoutOrder = 2,
-            AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.fromOffset(0, 18),
-            Font = config.Font, Text = tag, TextSize = 13,
-            TextColor3 = config.TextColor, ZIndex = 11,
+            Parent = bar,
+            BackgroundTransparency = 1,
+            LayoutOrder = 2,
+            AutomaticSize = Enum.AutomaticSize.X,
+            Size = UDim2.fromOffset(0, 18),
+            Font = config.Font,
+            Text = tag,
+            TextSize = 13,
+            TextColor3 = config.TextColor,
+            ZIndex = 11,
         })
-        local function Sep(order)
-            Create("Frame", {
-                Parent = bar, BackgroundColor3 = Color3.fromRGB(50, 50, 50),
-                Size = UDim2.fromOffset(1, 14), BorderSizePixel = 0, LayoutOrder = order, ZIndex = 11,
-            })
-        end
-        local function Stat(order, color)
-            return Create("TextLabel", {
-                Parent = bar, BackgroundTransparency = 1, LayoutOrder = order,
-                AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.fromOffset(0, 18),
-                Font = config.FontRegular, Text = "—", TextSize = 12,
-                TextColor3 = color or config.SubTextColor, ZIndex = 11,
-            })
-        end
-        Sep(3)
-        local timeL = Stat(4, config.TextColor)
-        Sep(5)
-        local fpsL = Stat(6, config.AccentColor)
-        Sep(7)
-        local pingL = Stat(8, config.TextColor)
-        Sep(9)
-        local countryL = Stat(10, config.SubTextColor)
 
-        -- FPS counter
-        StatsState.Frames = 0
-        StatsState.Fps = 0
+        local function makeSep(order)
+            Create("Frame", {
+                Parent = bar,
+                BackgroundColor3 = Color3.fromRGB(50, 50, 50),
+                Size = UDim2.fromOffset(1, 14),
+                BorderSizePixel = 0,
+                LayoutOrder = order,
+                ZIndex = 11,
+            })
+        end
+        local function makeStat(order, color)
+            return Create("TextLabel", {
+                Parent = bar,
+                BackgroundTransparency = 1,
+                LayoutOrder = order,
+                AutomaticSize = Enum.AutomaticSize.X,
+                Size = UDim2.fromOffset(0, 18),
+                Font = config.FontRegular,
+                Text = "--",
+                TextSize = 12,
+                TextColor3 = color or config.SubTextColor,
+                ZIndex = 11,
+            })
+        end
+
+        makeSep(3)
+        local timeL = makeStat(4, config.TextColor)
+        makeSep(5)
+        local fpsL = makeStat(6, config.AccentColor)
+        makeSep(7)
+        local pingL = makeStat(8, config.TextColor)
+        makeSep(9)
+        local countryL = makeStat(10, config.SubTextColor)
+
         local lastFpsTick = tick()
         StatsState.FpsConn = RunService.RenderStepped:Connect(function()
-            StatsState.Frames += 1
+            StatsState.Frames = StatsState.Frames + 1
             local now = tick()
             if now - lastFpsTick >= 1 then
                 StatsState.Fps = StatsState.Frames
@@ -3177,7 +3230,7 @@ function EmoLib:CreateWindow(config)
         local function resolve(arg, autoFn)
             if type(arg) == "function" then
                 local ok, v = pcall(arg)
-                if ok then return v end
+                if ok and v ~= nil then return v end
             elseif arg ~= nil and arg ~= true then
                 return arg
             end
@@ -3197,13 +3250,14 @@ function EmoLib:CreateWindow(config)
                 local stats = game:GetService("Stats")
                 local item = stats.Network.ServerStatsItem["Data Ping"]
                 if item then
-                    ms = tonumber((item:GetValueString() or ""):match("%d+")) or 0
+                    local s = item:GetValueString() or ""
+                    ms = tonumber(string.match(s, "%d+")) or 0
                 end
             end)
             if ms == 0 then
                 pcall(function()
                     local plr = Players.LocalPlayer
-                    if plr and plr:GetNetworkPing then
+                    if plr and type(plr.GetNetworkPing) == "function" then
                         ms = math.floor(plr:GetNetworkPing() * 1000)
                     end
                 end)
@@ -3211,39 +3265,44 @@ function EmoLib:CreateWindow(config)
             return tostring(ms) .. "MS"
         end
         local function autoCountry()
-            return "—"
+            return "--"
         end
 
         local function refresh()
-            if not gui.Parent then return end
+            if not StatsState.Running or not gui.Parent then return end
             timeL.Text = tostring(resolve(timeArg, autoTime))
             fpsL.Text = tostring(resolve(fpsArg, autoFps)) .. " FPS"
             local p = resolve(pingArg, autoPing)
-            if type(p) == "number" then p = tostring(math.floor(p)) .. "MS" end
+            if type(p) == "number" then
+                p = tostring(math.floor(p)) .. "MS"
+            end
             pingL.Text = tostring(p)
             countryL.Text = tostring(resolve(countryArg, autoCountry))
         end
+
         refresh()
-        StatsState.Conn = task.spawn(function()
-            while gui and gui.Parent do
+        task.spawn(function()
+            while StatsState.Running and gui and gui.Parent do
                 task.wait(interval)
                 refresh()
             end
         end)
 
         return {
-            Destroy = DestroyStatsPanel,
+            Destroy = function() DestroyStatsPanel() end,
             SetTag = function(_, t) tagL.Text = tostring(t or "") end,
-            SetCountry = function(_, c) countryArg = c; countryL.Text = tostring(c or "—") end,
-            SetIcon = function(_, src)
-                local r = EmoLib:GetIcon(src)
-                if r then logo.Image = r end
+            SetCountry = function(_, c)
+                countryArg = c
+                countryL.Text = tostring(c or "--")
+            end,
+            SetIcon = function(_, srcIcon)
+                local r = EmoLib:GetIcon(srcIcon)
+                if r then
+                    local logo = bar:FindFirstChildOfClass("ImageLabel")
+                    if logo then logo.Image = r end
+                end
             end,
         }
-    end
-
-    function Window:DestroyStatsPanel()
-        DestroyStatsPanel()
     end
 
     table.insert(EmoLib.Windows, Window)
