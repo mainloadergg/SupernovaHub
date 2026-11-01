@@ -10,7 +10,7 @@ local TextService = game:GetService("TextService")
 local Camera = workspace.CurrentCamera
 
 local EmoLib = {
-    Version = "8.3.0",
+    Version = "8.4.0",
     Windows = {},
 }
 
@@ -21,15 +21,20 @@ local THEMES = {
         AccentBright = Color3.fromRGB(255, 110, 110),
         TabIdle = Color3.fromRGB(210, 75, 75),
         SectionColor = Color3.fromRGB(200, 70, 70),
+        ActiveTabBg = Color3.fromRGB(32, 12, 12),
         ShineTint = Color3.fromRGB(255, 200, 200),
+        ToggleOn = Color3.fromRGB(180, 30, 30),
     },
+    -- Sec: clean oceanic accent (soft cyan-blue)
     Sec = {
-        AccentColor = Color3.fromRGB(230, 230, 230),
-        AccentSoft = Color3.fromRGB(200, 200, 200),
-        AccentBright = Color3.fromRGB(255, 255, 255),
-        TabIdle = Color3.fromRGB(190, 190, 190),
-        SectionColor = Color3.fromRGB(200, 200, 200),
-        ShineTint = Color3.fromRGB(240, 240, 240),
+        AccentColor = Color3.fromRGB(64, 168, 196),
+        AccentSoft = Color3.fromRGB(90, 185, 210),
+        AccentBright = Color3.fromRGB(140, 215, 235),
+        TabIdle = Color3.fromRGB(110, 170, 190),
+        SectionColor = Color3.fromRGB(100, 175, 195),
+        ActiveTabBg = Color3.fromRGB(14, 28, 34),
+        ShineTint = Color3.fromRGB(180, 230, 245),
+        ToggleOn = Color3.fromRGB(56, 150, 178),
     },
 }
 
@@ -1008,10 +1013,16 @@ local function ApplyStudTexture(parent, transparency, cornerRadius)
     return img
 end
 
-local function MakeShine(Host, CornerRadius, Intensity, enabled)
+local function MakeShine(Host, CornerRadius, Intensity, enabled, tintColor)
     if not Host or not enabled then return nil end
     CornerRadius = CornerRadius or 6
     local strong = Intensity == "strong"
+    tintColor = tintColor or Color3.fromRGB(255, 200, 200)
+    local edgeColor = Color3.fromRGB(
+        math.floor(tintColor.R * 180),
+        math.floor(tintColor.G * 180),
+        math.floor(tintColor.B * 180)
+    )
     local old = Host:FindFirstChild("EmoShine")
     if old then old:Destroy() end
 
@@ -1032,7 +1043,7 @@ local function MakeShine(Host, CornerRadius, Intensity, enabled)
         AnchorPoint = Vector2.new(0.5, 0.5),
         Size = UDim2.new(beamW, 0, beamH, 0),
         Position = UDim2.new(-0.5, 0, 0.5, 0),
-        BackgroundColor3 = Color3.fromRGB(255, 200, 200),
+        BackgroundColor3 = tintColor,
         BackgroundTransparency = strong and 0.62 or 0.84,
         BorderSizePixel = 0,
         Rotation = 25,
@@ -1041,7 +1052,6 @@ local function MakeShine(Host, CornerRadius, Intensity, enabled)
     })
     Create("UIGradient", {
         Parent = beam,
-        -- Horizontal soft falloff: transparent edges, brighter core
         Transparency = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 1),
             NumberSequenceKeypoint.new(0.28, strong and 0.55 or 0.78),
@@ -1050,9 +1060,9 @@ local function MakeShine(Host, CornerRadius, Intensity, enabled)
             NumberSequenceKeypoint.new(1, 1),
         }),
         Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 40, 40)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 235, 235)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 40, 40)),
+            ColorSequenceKeypoint.new(0, edgeColor),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(1, edgeColor),
         }),
     })
 
@@ -1349,22 +1359,28 @@ end
 
 function EmoLib:CreateWindow(config)
     config = config or {}
+    local explicitAccent = config.AccentColor
+    local explicitTheme = config.Theme
     for k, v in pairs(DEFAULTS) do
         if config[k] == nil then config[k] = v end
     end
-    -- Theme: "Main" (red, default) | "Sec" (white accent)
-    local themeName = tostring(config.Theme or "Main")
-    if themeName:lower() == "sec" then themeName = "Sec" else themeName = "Main" end
+    -- Theme: "Main" (red) | "Sec" (ocean blue). Default Main.
+    local themeName = tostring(explicitTheme or config.Theme or "Main")
+    if string.lower(themeName) == "sec" then
+        themeName = "Sec"
+    else
+        themeName = "Main"
+    end
     config.Theme = themeName
     local theme = THEMES[themeName] or THEMES.Main
-    -- only override accent-related colors if user did not pass them explicitly
-    if config.AccentColor == DEFAULTS.AccentColor or themeName == "Sec" then
-        -- For Sec always apply white palette for accents; for Main keep defaults unless custom
-        if themeName == "Sec" then
-            config.AccentColor = theme.AccentColor
-        end
-    end
     config._Theme = theme
+    -- Accent follows theme unless the user passed AccentColor explicitly
+    if explicitAccent ~= nil then
+        config.AccentColor = explicitAccent
+    else
+        config.AccentColor = theme.AccentColor
+    end
+    config.ToggleOnColor = theme.ToggleOn or theme.AccentColor
 
     local ClickSoundObj = nil
     local function PlayClick()
@@ -1420,7 +1436,10 @@ function EmoLib:CreateWindow(config)
     })
     ApplyStudTexture(Main, 0.72, 6)
     if config.ReflectanceEffect then
-        task.defer(function() MakeShine(Main, 6, "normal", true) end)
+        task.defer(function()
+            local tint = (config._Theme and config._Theme.ShineTint) or config.AccentColor
+            MakeShine(Main, 6, "normal", true, tint)
+        end)
     end
 
     local function CenterMain()
@@ -1797,7 +1816,7 @@ function EmoLib:CreateWindow(config)
             Name = "Label", Parent = sec, BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 0, 14),
             Font = config.Font, Text = string.upper(tostring(title or "SECTION")),
-            TextColor3 = Color3.fromRGB(150, 45, 45), TextSize = 11,
+            TextColor3 = config.AccentColor, TextSize = 11,
             TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2,
         })
         local list = Create("Frame", {
@@ -2037,7 +2056,7 @@ function EmoLib:CreateWindow(config)
         Create("ImageLabel", {
             Name = "Icon", Parent = tabBtn, BackgroundTransparency = 1,
             Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(9, 8),
-            Image = EmoLib:GetIcon(icon) or "rbxassetid://0", ImageColor3 = Color3.fromRGB(200, 60, 60),
+            Image = EmoLib:GetIcon(icon) or "rbxassetid://0", ImageColor3 = config.AccentColor,
             ScaleType = Enum.ScaleType.Fit, ZIndex = 4,
         })
         local tabTitle = Create("TextLabel", {
@@ -2065,7 +2084,7 @@ function EmoLib:CreateWindow(config)
             end
             CurrentTab = Tab
             page.Visible = true
-            Tween(tabBtn, {BackgroundColor3 = config.Theme == "Sec" and Color3.fromRGB(28, 28, 28) or Color3.fromRGB(32, 12, 12)}, 0.15)
+            Tween(tabBtn, {BackgroundColor3 = (config._Theme and config._Theme.ActiveTabBg) or Color3.fromRGB(32, 12, 12)}, 0.15)
             tabTitle.TextColor3 = (config._Theme and config._Theme.AccentBright) or Color3.fromRGB(255, 110, 110)
             -- restore this tab's scroll (next frame so layout is ready)
             local restore = Tab.ScrollPos or Vector2.new(0, 0)
@@ -2161,7 +2180,7 @@ function EmoLib:CreateWindow(config)
                 Size = UDim2.new(1, expandable and -(leftPad + 32) or -(leftPad + 8), 1, 0),
                 Font = config.Font,
                 Text = string.upper(tostring(title or "Section")),
-                TextColor3 = Color3.fromRGB(200, 70, 70),
+                TextColor3 = (config._Theme and config._Theme.SectionColor) or config.AccentColor,
                 TextSize = 12,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 ZIndex = 5,
@@ -2178,7 +2197,7 @@ function EmoLib:CreateWindow(config)
                     AnchorPoint = Vector2.new(1, 0.5),
                     Position = UDim2.new(1, -10, 0.5, 0),
                     Image = "rbxassetid://10709790948", -- lucide-chevron-down
-                    ImageColor3 = Color3.fromRGB(220, 90, 90),
+                    ImageColor3 = config.AccentColor,
                     ImageTransparency = 0,
                     ScaleType = Enum.ScaleType.Fit,
                     Rotation = opened and 0 or -90,
@@ -2329,7 +2348,7 @@ function EmoLib:CreateWindow(config)
 
             local toggleBg = Create("Frame", {
                 Parent = frame,
-                BackgroundColor3 = default and config.AccentColor or Color3.fromRGB(40, 40, 40),
+                BackgroundColor3 = default and (config.ToggleOnColor or config.AccentColor) or Color3.fromRGB(40, 40, 40),
                 Size = UDim2.fromOffset(40, 20),
                 AnchorPoint = Vector2.new(1, 0.5),
                 Position = UDim2.new(1, -12, 0.5, 0),
@@ -2347,7 +2366,7 @@ function EmoLib:CreateWindow(config)
             local state = default or false
             local function SetState(val, fire)
                 state = val
-                Tween(toggleBg, {BackgroundColor3 = state and config.AccentColor or Color3.fromRGB(40, 40, 40)}, 0.15)
+                Tween(toggleBg, {BackgroundColor3 = state and (config.ToggleOnColor or config.AccentColor) or Color3.fromRGB(40, 40, 40)}, 0.15)
                 Tween(circle, {Position = state and UDim2.new(1, -17, 0.5, -7) or UDim2.fromOffset(3, 3)}, 0.15)
                 if fire and callback then callback(state) end
             end
@@ -2380,7 +2399,7 @@ function EmoLib:CreateWindow(config)
                 AnchorPoint = Vector2.new(1, 0.5),
                 Position = UDim2.new(1, -12, 0.5, 0),
                 Image = EmoLib:GetIcon("chevron-right") or "rbxassetid://10709791437",
-                ImageColor3 = Color3.fromRGB(180, 60, 60),
+                ImageColor3 = config.AccentColor,
             })
 
             local btn = Create("TextButton", {
@@ -2388,11 +2407,11 @@ function EmoLib:CreateWindow(config)
             })
             btn.MouseEnter:Connect(function()
                 Tween(frame, {BackgroundColor3 = Color3.fromRGB(24, 14, 14)}, 0.12)
-                Tween(arrow, {ImageColor3 = Color3.fromRGB(255, 90, 90)}, 0.12)
+                Tween(arrow, {ImageColor3 = (config._Theme and config._Theme.AccentBright) or config.AccentColor}, 0.12)
             end)
             btn.MouseLeave:Connect(function()
                 Tween(frame, {BackgroundColor3 = Color3.fromRGB(14, 14, 14)}, 0.12)
-                Tween(arrow, {ImageColor3 = Color3.fromRGB(180, 60, 60)}, 0.12)
+                Tween(arrow, {ImageColor3 = config.AccentColor}, 0.12)
             end)
             btn.MouseButton1Click:Connect(function() PlayClick(); if callback then callback() end end)
 
@@ -2655,7 +2674,7 @@ function EmoLib:CreateWindow(config)
                 Parent = valueBox, BackgroundTransparency = 1, Size = UDim2.fromOffset(12, 12),
                 Position = UDim2.new(1, -18, 0.5, -6),
                 Image = EmoLib:GetIcon("chevron-down") or "rbxassetid://10709790948",
-                ImageColor3 = Color3.fromRGB(180, 60, 60),
+                ImageColor3 = config.AccentColor,
             })
 
             local MODAL_W, MODAL_H = 300, 360
@@ -2695,13 +2714,13 @@ function EmoLib:CreateWindow(config)
                 Parent = modalHeader, Image = EmoLib:GetIcon("x") or "rbxassetid://10747384394",
                 Size = UDim2.fromOffset(16, 16), Position = UDim2.new(1, -28, 0.5, 0),
                 AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1,
-                ImageColor3 = Color3.fromRGB(160, 70, 70), ZIndex = 303,
+                ImageColor3 = config.AccentColor, ZIndex = 303,
             })
             ModalClose.MouseEnter:Connect(function()
-                Tween(ModalClose, {ImageColor3 = Color3.fromRGB(255, 100, 100)}, 0.12)
+                Tween(ModalClose, {ImageColor3 = (config._Theme and config._Theme.AccentBright) or config.AccentColor}, 0.12)
             end)
             ModalClose.MouseLeave:Connect(function()
-                Tween(ModalClose, {ImageColor3 = Color3.fromRGB(160, 70, 70)}, 0.12)
+                Tween(ModalClose, {ImageColor3 = config.AccentColor}, 0.12)
             end)
 
             -- subtle divider under header
@@ -3124,47 +3143,48 @@ function EmoLib:CreateWindow(config)
         StatsState.Frames = 0
         StatsState.Fps = 0
 
+        -- Compact fixed-height pill. Width grows with content only (AutomaticSize.X),
+        -- never with scale, so it cannot stretch across the screen.
         local bar = Create("Frame", {
             Name = "Bar",
             Parent = gui,
             AnchorPoint = Vector2.new(0.5, 0),
-            Position = UDim2.new(0.5, 0, 0, 10),
-            Size = UDim2.fromOffset(0, 34),
+            Position = UDim2.new(0.5, 0, 0, 12),
+            Size = UDim2.fromOffset(10, 30),
             AutomaticSize = Enum.AutomaticSize.X,
-            BackgroundColor3 = Color3.fromRGB(12, 12, 12),
-            BackgroundTransparency = 0.08,
+            BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+            BackgroundTransparency = 0.12,
             BorderSizePixel = 0,
             ZIndex = 10,
         })
-        Create("UICorner", { Parent = bar, CornerRadius = UDim.new(0, 8) })
+        Create("UICorner", { Parent = bar, CornerRadius = UDim.new(1, 0) }) -- pill
         Create("UIStroke", {
             Parent = bar,
             Color = config.AccentColor,
             Thickness = 1,
-            Transparency = 0.55,
+            Transparency = 0.6,
         })
-        Create("UIListLayout", {
+        local layout = Create("UIListLayout", {
             Parent = bar,
             FillDirection = Enum.FillDirection.Horizontal,
             VerticalAlignment = Enum.VerticalAlignment.Center,
             HorizontalAlignment = Enum.HorizontalAlignment.Center,
-            Padding = UDim.new(0, 10),
+            Padding = UDim.new(0, 8),
             SortOrder = Enum.SortOrder.LayoutOrder,
         })
         Create("UIPadding", {
             Parent = bar,
             PaddingLeft = UDim.new(0, 12),
             PaddingRight = UDim.new(0, 12),
-            PaddingTop = UDim.new(0, 4),
-            PaddingBottom = UDim.new(0, 4),
+            PaddingTop = UDim.new(0, 0),
+            PaddingBottom = UDim.new(0, 0),
         })
-        pcall(function() ApplyStudTexture(bar, 0.82, 8) end)
 
-        Create("ImageLabel", {
+        local logo = Create("ImageLabel", {
             Parent = bar,
             BackgroundTransparency = 1,
             LayoutOrder = 1,
-            Size = UDim2.fromOffset(18, 18),
+            Size = UDim2.fromOffset(16, 16),
             Image = iconImg,
             ScaleType = Enum.ScaleType.Fit,
             ZIndex = 11,
@@ -3175,9 +3195,9 @@ function EmoLib:CreateWindow(config)
             LayoutOrder = 2,
             AutomaticSize = Enum.AutomaticSize.X,
             Size = UDim2.fromOffset(0, 18),
-            Font = config.Font,
+            Font = Enum.Font.GothamMedium,
             Text = tag,
-            TextSize = 13,
+            TextSize = 12,
             TextColor3 = config.TextColor,
             ZIndex = 11,
         })
@@ -3185,8 +3205,9 @@ function EmoLib:CreateWindow(config)
         local function makeSep(order)
             Create("Frame", {
                 Parent = bar,
-                BackgroundColor3 = Color3.fromRGB(50, 50, 50),
-                Size = UDim2.fromOffset(1, 14),
+                BackgroundColor3 = Color3.fromRGB(55, 55, 60),
+                BackgroundTransparency = 0.25,
+                Size = UDim2.fromOffset(1, 12),
                 BorderSizePixel = 0,
                 LayoutOrder = order,
                 ZIndex = 11,
@@ -3199,22 +3220,22 @@ function EmoLib:CreateWindow(config)
                 LayoutOrder = order,
                 AutomaticSize = Enum.AutomaticSize.X,
                 Size = UDim2.fromOffset(0, 18),
-                Font = config.FontRegular,
+                Font = Enum.Font.Gotham,
                 Text = "--",
-                TextSize = 12,
+                TextSize = 11,
                 TextColor3 = color or config.SubTextColor,
                 ZIndex = 11,
             })
         end
 
         makeSep(3)
-        local timeL = makeStat(4, config.TextColor)
+        local timeL = makeStat(4, Color3.fromRGB(210, 210, 215))
         makeSep(5)
         local fpsL = makeStat(6, config.AccentColor)
         makeSep(7)
-        local pingL = makeStat(8, config.TextColor)
+        local pingL = makeStat(8, Color3.fromRGB(210, 210, 215))
         makeSep(9)
-        local countryL = makeStat(10, config.SubTextColor)
+        local countryL = makeStat(10, Color3.fromRGB(150, 155, 160))
 
         local lastFpsTick = tick()
         StatsState.FpsConn = RunService.RenderStepped:Connect(function()
@@ -3297,10 +3318,7 @@ function EmoLib:CreateWindow(config)
             end,
             SetIcon = function(_, srcIcon)
                 local r = EmoLib:GetIcon(srcIcon)
-                if r then
-                    local logo = bar:FindFirstChildOfClass("ImageLabel")
-                    if logo then logo.Image = r end
-                end
+                if r then logo.Image = r end
             end,
         }
     end
