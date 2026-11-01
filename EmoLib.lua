@@ -995,47 +995,74 @@ local function MakeShine(Host, CornerRadius, Intensity, enabled)
     local old = Host:FindFirstChild("EmoShine")
     if old then old:Destroy() end
 
+    -- Clip container matches host bounds and rounds corners so the beam never bleeds out.
     local clip = Create("Frame", {
         Name = "EmoShine", Parent = Host, BackgroundTransparency = 1,
         Size = UDim2.fromScale(1, 1), ZIndex = 20, ClipsDescendants = true, Active = false,
     })
     Create("UICorner", {Parent = clip, CornerRadius = UDim.new(0, CornerRadius)})
 
+    -- Beam is intentionally taller than the host so a ~25° diagonal still covers
+    -- the full height while sweeping left→right. Starts fully off-screen and
+    -- ends fully off-screen (no half-cut pass).
+    local beamW = strong and 0.55 or 0.38   -- relative to host width
+    local beamH = 2.6                       -- taller than host to cover diagonal
     local beam = Create("Frame", {
         Name = "ShineBeam", Parent = clip,
         AnchorPoint = Vector2.new(0.5, 0.5),
-        Size = UDim2.new(strong and 0.45 or 0.3, 0, 1, 0),
-        Position = UDim2.new(-0.2, 0, 0.5, 0),
-        BackgroundColor3 = Color3.fromRGB(255, 140, 140),
-        BackgroundTransparency = strong and 0.55 or 0.82,
-        BorderSizePixel = 0, Rotation = 14, Active = false, ZIndex = 21,
+        Size = UDim2.new(beamW, 0, beamH, 0),
+        Position = UDim2.new(-0.5, 0, 0.5, 0),
+        BackgroundColor3 = Color3.fromRGB(255, 200, 200),
+        BackgroundTransparency = strong and 0.62 or 0.84,
+        BorderSizePixel = 0,
+        Rotation = 25,
+        Active = false,
+        ZIndex = 21,
     })
     Create("UIGradient", {
         Parent = beam,
+        -- Horizontal soft falloff: transparent edges, brighter core
         Transparency = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 1),
-            NumberSequenceKeypoint.new(0.35, strong and 0.45 or 0.7),
-            NumberSequenceKeypoint.new(0.5, strong and 0.2 or 0.4),
-            NumberSequenceKeypoint.new(0.65, strong and 0.45 or 0.7),
+            NumberSequenceKeypoint.new(0.28, strong and 0.55 or 0.78),
+            NumberSequenceKeypoint.new(0.5, strong and 0.25 or 0.5),
+            NumberSequenceKeypoint.new(0.72, strong and 0.55 or 0.78),
             NumberSequenceKeypoint.new(1, 1),
         }),
         Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(160, 30, 30)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 230, 230)),
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 40, 40)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 235, 235)),
             ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 40, 40)),
         }),
     })
 
-    local t0, speed = tick(), strong and 2.8 or 3.8
+    -- Full sweep: start center at -0.55 (completely left of host) → 1.55 (completely right)
+    local t0 = tick()
+    local speed = strong and 3.2 or 4.4   -- seconds per full pass
+    local pause = strong and 0.8 or 1.4  -- idle after each pass
+    local cycle = speed + pause
     local conn
     conn = RunService.RenderStepped:Connect(function()
         if not clip.Parent or not beam.Parent then
             pcall(function() conn:Disconnect() end)
             return
         end
-        local alpha = ((tick() - t0) % speed) / speed
-        beam.Position = UDim2.new(-0.15 + alpha * 1.3, 0, 0.5, 0)
-        beam.BackgroundTransparency = (strong and 0.5 or 0.78) + math.sin(alpha * math.pi * 2) * 0.04
+        local elapsed = (tick() - t0) % cycle
+        if elapsed > speed then
+            -- rest phase: keep beam off-screen to the right
+            beam.Position = UDim2.new(1.55, 0, 0.5, 0)
+            beam.BackgroundTransparency = 1
+            return
+        end
+        local alpha = elapsed / speed  -- 0 → 1 across the host
+        -- ease in-out for a smoother glide
+        local eased = alpha * alpha * (3 - 2 * alpha)
+        local x = -0.55 + eased * 2.1  -- -0.55 → 1.55
+        beam.Position = UDim2.new(x, 0, 0.5, 0)
+        -- slight pulse so the peak isn't flat
+        local pulse = math.sin(alpha * math.pi)  -- 0 at edges, 1 in middle
+        local base = strong and 0.58 or 0.8
+        beam.BackgroundTransparency = base - pulse * (strong and 0.12 or 0.08)
     end)
     clip.Destroying:Connect(function() pcall(function() conn:Disconnect() end) end)
     return clip
@@ -2125,13 +2152,29 @@ function EmoLib:CreateWindow(config)
             }
         end
 
-        -- Compatibility wrapper so AddSection("Title", "icon") still works
+        -- Flexible API:
+        --   AddSection("Title")
+        --   AddSection("Title", "icon")
+        --   AddSection("Title", true)            -- Opened = true (chevron)
+        --   AddSection("Title", false)           -- Opened = false (chevron, starts closed)
+        --   AddSection("Title", "icon", true)
+        --   AddSection("Title", "icon", false)
+        --   AddSection({ Title=, Icon=, Opened= })
         local _AddSection = Tab.AddSection
-        function Tab:AddSection(a, b)
+        function Tab:AddSection(a, b, c)
             if type(a) == "table" then
                 return _AddSection(self, a)
             end
-            return _AddSection(self, { Title = a, Icon = b })
+            local cfg = { Title = a }
+            if type(b) == "boolean" then
+                cfg.Opened = b
+            elseif type(b) == "string" then
+                cfg.Icon = b
+                if type(c) == "boolean" then
+                    cfg.Opened = c
+                end
+            end
+            return _AddSection(self, cfg)
         end
 
         function Tab:AddLabel(title, subtitle)
