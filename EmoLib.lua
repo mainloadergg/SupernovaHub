@@ -10,7 +10,7 @@ local TextService = game:GetService("TextService")
 local Camera = workspace.CurrentCamera
 
 local EmoLib = {
-    Version = "8.5.0",
+    Version = "8.4.1",
     Windows = {},
 }
 
@@ -39,12 +39,7 @@ local THEMES = {
 }
 
 local DEFAULTS = {
-    HeaderTexture = "rbxassetid://6927295847",
-    BackgroundTexture = "rbxassetid://6927295847", -- texture overlay (studs / pattern). nil or "" disables
-    TextureTransparency = 0.72, -- higher = more transparent (less visible texture). 0 = solid, 1 = invisible
-    TextureDarkness = 0.35, -- 0..1 how much the overlay darkens the panel (multiplies black layer)
-    GlassEffect = true, -- glass-style panels (semi transparent + soft stroke + gradient)
-    GlassTransparency = 0.12, -- panel body transparency when GlassEffect is on
+    HeaderTexture = "rbxassetid://8822777842",
     Theme = "Main",
     AccentColor = Color3.fromRGB(180, 30, 30),
     BackgroundColor = Color3.fromRGB(12, 12, 12),
@@ -1004,73 +999,18 @@ function EmoLib:GetIcon(Name)
     return nil
 end
 
--- Applies optional pattern texture + optional dark overlay (glass / stud look).
--- texture: rbxassetid or nil to use config/default. transparency: image alpha (higher = subtler).
--- darkness: 0..1 black layer on top of the texture (panel feels darker without changing base color).
-local function ApplyStudTexture(parent, transparency, cornerRadius, texture, darkness)
+local function ApplyStudTexture(parent, transparency, cornerRadius)
+    transparency = transparency or 0.55
     cornerRadius = cornerRadius or 6
-    transparency = transparency
-    if transparency == nil then transparency = DEFAULTS.TextureTransparency or 0.72 end
-    darkness = darkness
-    if darkness == nil then darkness = DEFAULTS.TextureDarkness or 0 end
-    darkness = math.clamp(tonumber(darkness) or 0, 0, 1)
-
     local existing = parent:FindFirstChild("_StudTexture")
     if existing then existing:Destroy() end
-    local existingDark = parent:FindFirstChild("_TextureDark")
-    if existingDark then existingDark:Destroy() end
-
-    local tex = texture
-    if tex == nil then tex = DEFAULTS.BackgroundTexture or DEFAULTS.HeaderTexture end
-    if type(tex) == "string" and tex ~= "" then
-        local img = Create("ImageLabel", {
-            Name = "_StudTexture", Parent = parent, BackgroundTransparency = 1,
-            Size = UDim2.fromScale(1, 1), Image = tex,
-            ImageTransparency = transparency, ScaleType = Enum.ScaleType.Crop, ZIndex = 0,
-        })
-        Create("UICorner", {Parent = img, CornerRadius = UDim.new(0, cornerRadius)})
-    end
-
-    if darkness > 0.01 then
-        local dark = Create("Frame", {
-            Name = "_TextureDark", Parent = parent,
-            BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-            BackgroundTransparency = 1 - darkness,
-            BorderSizePixel = 0,
-            Size = UDim2.fromScale(1, 1),
-            ZIndex = 0,
-        })
-        Create("UICorner", {Parent = dark, CornerRadius = UDim.new(0, cornerRadius)})
-    end
-end
-
--- Soft glass gradient wash (top highlight → transparent). Safe to call multiple times.
-local function ApplyGlassWash(parent, cornerRadius, strength)
-    if not parent then return end
-    cornerRadius = cornerRadius or 6
-    strength = strength or 0.18
-    local old = parent:FindFirstChild("_GlassWash")
-    if old then old:Destroy() end
-    local wash = Create("Frame", {
-        Name = "_GlassWash", Parent = parent,
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        Size = UDim2.fromScale(1, 1),
-        ZIndex = 1,
+    local img = Create("ImageLabel", {
+        Name = "_StudTexture", Parent = parent, BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1), Image = DEFAULTS.HeaderTexture,
+        ImageTransparency = transparency, ScaleType = Enum.ScaleType.Crop, ZIndex = 0,
     })
-    Create("UICorner", {Parent = wash, CornerRadius = UDim.new(0, cornerRadius)})
-    Create("UIGradient", {
-        Parent = wash,
-        Rotation = 90,
-        Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 1 - strength),
-            NumberSequenceKeypoint.new(0.35, 1 - strength * 0.35),
-            NumberSequenceKeypoint.new(1, 1),
-        }),
-        Color = ColorSequence.new(Color3.fromRGB(255, 255, 255)),
-    })
-    return wash
+    Create("UICorner", {Parent = img, CornerRadius = UDim.new(0, cornerRadius)})
+    return img
 end
 
 local function MakeShine(Host, CornerRadius, Intensity, enabled, tintColor)
@@ -1280,20 +1220,19 @@ function EmoLib:Notify(config)
 
     local root = Create("Frame", {
         Parent = slot,
-        BackgroundColor3 = Color3.fromRGB(16, 16, 20),
-        BackgroundTransparency = 0.12,
+        BackgroundColor3 = Color3.fromRGB(14, 14, 14),
+        BackgroundTransparency = 0.05,
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         Position = UDim2.new(1, 60, 0, 0),
         ZIndex = 101,
         ClipsDescendants = true,
     })
-    Create("UICorner", {Parent = root, CornerRadius = UDim.new(0, 10)})
+    Create("UICorner", {Parent = root, CornerRadius = UDim.new(0, 6)})
     Create("UIStroke", {
-        Parent = root, Color = Color3.fromRGB(255, 255, 255), Thickness = 1, Transparency = 0.85,
+        Parent = root, Color = accent, Thickness = 1, Transparency = 0.4,
     })
-    ApplyStudTexture(root, 0.8, 10, DEFAULTS.BackgroundTexture, DEFAULTS.TextureDarkness)
-    ApplyGlassWash(root, 10, 0.1)
+    ApplyStudTexture(root, 0.75, 6)
 
     -- left accent bar
     Create("Frame", {
@@ -1463,11 +1402,6 @@ function EmoLib:CreateWindow(config)
     pcall(function()
         local parent = (gethui and gethui()) or CoreGui
         if parent:FindFirstChild("EmoLib") then parent.EmoLib:Destroy() end
-        if parent:FindFirstChild("EmoLib_StatsPanel") then parent.EmoLib_StatsPanel:Destroy() end
-        if parent:FindFirstChild("EmoLib_Notifications") then
-            -- keep notifications; optional wipe:
-            -- parent.EmoLib_Notifications:Destroy()
-        end
     end)
 
     local ScreenGui = Create("ScreenGui", {
@@ -1490,31 +1424,21 @@ function EmoLib:CreateWindow(config)
         return UDim2.fromOffset(w, h)
     end
 
-    local useGlass = config.GlassEffect ~= false
-    local mainTrans = useGlass and (tonumber(config.GlassTransparency) or 0.12) or 0
     local Main = Create("CanvasGroup", {
         Name = "Main", Parent = ScreenGui,
-        BackgroundColor3 = config.BackgroundColor, BackgroundTransparency = mainTrans,
+        BackgroundColor3 = config.BackgroundColor, BackgroundTransparency = 0,
         BorderSizePixel = 0, Size = GetUISize(), Position = UDim2.fromOffset(0, 0),
         AnchorPoint = Vector2.new(0, 0), ClipsDescendants = true, GroupTransparency = 1,
     })
-    Create("UICorner", {Parent = Main, CornerRadius = UDim.new(0, 10)})
+    Create("UICorner", {Parent = Main, CornerRadius = UDim.new(0, 6)})
     local MainStroke = Create("UIStroke", {
-        Parent = Main,
-        Color = useGlass and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(30, 30, 30),
-        Thickness = useGlass and 1.2 or 1,
-        Transparency = useGlass and 0.82 or 0.3,
+        Parent = Main, Color = Color3.fromRGB(30, 30, 30), Thickness = 1, Transparency = 0.3,
     })
-    local texT = config.TextureTransparency
-    if texT == nil then texT = DEFAULTS.TextureTransparency end
-    ApplyStudTexture(Main, texT, 10, config.BackgroundTexture, config.TextureDarkness)
-    if useGlass then
-        ApplyGlassWash(Main, 10, 0.12)
-    end
+    ApplyStudTexture(Main, 0.72, 6)
     if config.ReflectanceEffect then
         task.defer(function()
             local tint = (config._Theme and config._Theme.ShineTint) or config.AccentColor
-            MakeShine(Main, 10, "normal", true, tint)
+            MakeShine(Main, 6, "normal", true, tint)
         end)
     end
 
@@ -1550,15 +1474,8 @@ function EmoLib:CreateWindow(config)
 
     local function FadeOutAndDestroy()
         PlayClick()
-        pcall(function()
-            if Window and Window.DestroyStatsPanel then
-                Window:DestroyStatsPanel()
-            end
-        end)
         FadeOutMain(function()
-            if ScreenGui and ScreenGui.Parent then
-                ScreenGui:Destroy()
-            end
+            ScreenGui:Destroy()
         end)
     end
 
@@ -1682,139 +1599,77 @@ function EmoLib:CreateWindow(config)
 
     local function ShowDialog(title, message, onConfirm, onCancel)
         PlayClick()
-        local useGlass = config.GlassEffect ~= false
-        local panelBg = config.BackgroundColor or Color3.fromRGB(16, 16, 18)
-        local panelTrans = useGlass and (config.GlassTransparency or 0.12) or 0
-
         local overlay = Create("TextButton", {
             Name = "EmoDialog", Parent = ScreenGui, Size = UDim2.fromScale(1, 1),
             BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 1,
             Text = "", AutoButtonColor = false, ZIndex = 500,
         })
-        Tween(overlay, {BackgroundTransparency = 0.55}, 0.2)
+        Tween(overlay, {BackgroundTransparency = 0.5}, 0.18)
 
         local panel = Create("Frame", {
             Parent = overlay, AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.new(0.5, 0, 0.4, 0), Size = UDim2.fromOffset(360, 178),
-            BackgroundColor3 = panelBg, BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, 0, 0.42, 0), Size = UDim2.fromOffset(340, 160),
+            BackgroundColor3 = Color3.fromRGB(18, 18, 18), BackgroundTransparency = 1,
             ZIndex = 501, ClipsDescendants = true,
         })
-        Create("UICorner", {Parent = panel, CornerRadius = UDim.new(0, 12)})
-        local pStroke = Create("UIStroke", {
-            Parent = panel,
-            Color = Color3.fromRGB(
-                math.floor((config.AccentColor.R * 255) * 0.55 + 80),
-                math.floor((config.AccentColor.G * 255) * 0.55 + 80),
-                math.floor((config.AccentColor.B * 255) * 0.55 + 80)
-            ),
-            Thickness = 1.2, Transparency = 1,
-        })
-        local texT = config.TextureTransparency
-        if texT == nil then texT = 0.78 end
-        ApplyStudTexture(panel, texT, 12, config.BackgroundTexture, config.TextureDarkness)
-        if useGlass then
-            ApplyGlassWash(panel, 12, 0.14)
-        end
-        Tween(pStroke, {Transparency = 0.45}, 0.12)
-        task.delay(0.05, function()
-            Tween(panel, {
-                Position = UDim2.fromScale(0.5, 0.5),
-                BackgroundTransparency = panelTrans,
-            }, 0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        Create("UICorner", {Parent = panel, CornerRadius = UDim.new(0, 6)})
+        local pStroke = Create("UIStroke", {Parent = panel, Color = config.AccentColor, Thickness = 1, Transparency = 1})
+        ApplyStudTexture(panel, 0.7, 6)
+        Tween(pStroke, {Transparency = 0.35}, 0.1)
+        task.delay(0.06, function()
+            Tween(panel, {Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 0}, 0.2)
         end)
 
-        -- accent top line
-        local accentLine = Create("Frame", {
-            Parent = panel, BorderSizePixel = 0, ZIndex = 503,
-            BackgroundColor3 = config.AccentColor,
-            Size = UDim2.new(1, 0, 0, 2), Position = UDim2.fromOffset(0, 0),
-        })
-        Create("UICorner", {Parent = accentLine, CornerRadius = UDim.new(0, 12)})
-        -- cover bottom of the line so only the top edge shows rounded
-        Create("Frame", {
-            Parent = panel, BorderSizePixel = 0, ZIndex = 503,
-            BackgroundColor3 = config.AccentColor,
-            Size = UDim2.new(1, 0, 0, 4), Position = UDim2.fromOffset(0, 0),
-            BackgroundTransparency = 0,
-        })
-
         Create("TextLabel", {
-            Parent = panel, BackgroundTransparency = 1, Position = UDim2.fromOffset(22, 20),
-            Size = UDim2.new(1, -44, 0, 22), Font = config.Font, Text = title or "Confirm",
-            TextColor3 = config.TextColor, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 504,
+            Parent = panel, BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 14),
+            Size = UDim2.new(1, -36, 0, 22), Font = config.Font, Text = title or "Confirm",
+            TextColor3 = config.TextColor, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 502,
         })
         Create("TextLabel", {
-            Parent = panel, BackgroundTransparency = 1, Position = UDim2.fromOffset(22, 50),
-            Size = UDim2.new(1, -44, 0, 54), Font = config.FontRegular, Text = message or "",
+            Parent = panel, BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 42),
+            Size = UDim2.new(1, -36, 0, 50), Font = config.FontRegular, Text = message or "",
             TextColor3 = config.SubTextColor, TextSize = 13, TextWrapped = true,
-            TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 504,
+            TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 502,
         })
 
         local function closeDialog(confirmed)
             PlayClick()
             Tween(pStroke, {Transparency = 1}, 0.08)
-            task.delay(0.05, function()
-                Tween(overlay, {BackgroundTransparency = 1}, 0.16)
-                Tween(panel, {Position = UDim2.new(0.5, 0, 0.4, 0), BackgroundTransparency = 1}, 0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-                task.wait(0.17)
-                if overlay and overlay.Parent then overlay:Destroy() end
+            task.delay(0.06, function()
+                Tween(overlay, {BackgroundTransparency = 1}, 0.14)
+                Tween(panel, {Position = UDim2.new(0.5, 0, 0.42, 0), BackgroundTransparency = 1}, 0.14)
+                task.wait(0.15)
+                overlay:Destroy()
                 if confirmed and onConfirm then onConfirm()
                 elseif not confirmed and onCancel then onCancel() end
             end)
         end
 
-        -- Buttons row (glass pills)
-        local btnY = 124
         local yesBtn = Create("TextButton", {
-            Parent = panel, Size = UDim2.fromOffset(128, 36), Position = UDim2.new(1, -150, 0, btnY),
-            BackgroundColor3 = config.AccentColor, BackgroundTransparency = 0.05,
-            Text = "Confirm", Font = config.Font, TextSize = 13, TextColor3 = Color3.fromRGB(255, 255, 255),
-            AutoButtonColor = false, ZIndex = 504,
+            Parent = panel, Size = UDim2.fromOffset(120, 32), Position = UDim2.new(1, -140, 1, -44),
+            BackgroundColor3 = Color3.fromRGB(14, 14, 14), BackgroundTransparency = 0.1,
+            Text = "Confirm", Font = config.Font, TextSize = 13, TextColor3 = config.TextColor,
+            AutoButtonColor = false, ZIndex = 502,
         })
-        Create("UICorner", {Parent = yesBtn, CornerRadius = UDim.new(0, 8)})
-        local yesStroke = Create("UIStroke", {
-            Parent = yesBtn, Color = Color3.fromRGB(255, 255, 255), Thickness = 1, Transparency = 0.85,
-        })
-        yesBtn.MouseEnter:Connect(function()
-            Tween(yesBtn, {BackgroundTransparency = 0, Size = UDim2.fromOffset(130, 38)}, 0.12)
-            Tween(yesStroke, {Transparency = 0.7}, 0.12)
-        end)
-        yesBtn.MouseLeave:Connect(function()
-            Tween(yesBtn, {BackgroundTransparency = 0.05, Size = UDim2.fromOffset(128, 36)}, 0.12)
-            Tween(yesStroke, {Transparency = 0.85}, 0.12)
-        end)
+        Create("UICorner", {Parent = yesBtn, CornerRadius = UDim.new(0, 5)})
+        Create("UIStroke", {Parent = yesBtn, Color = config.AccentColor, Thickness = 1.2, Transparency = 0.25})
         yesBtn.MouseButton1Click:Connect(function() closeDialog(true) end)
 
         local noBtn = Create("TextButton", {
-            Parent = panel, Size = UDim2.fromOffset(110, 36), Position = UDim2.new(1, -272, 0, btnY),
-            BackgroundColor3 = Color3.fromRGB(28, 28, 32), BackgroundTransparency = useGlass and 0.25 or 0.05,
-            Text = "Cancel", Font = config.Font, TextSize = 13, TextColor3 = config.TextColor,
-            AutoButtonColor = false, ZIndex = 504,
+            Parent = panel, Size = UDim2.fromOffset(100, 32), Position = UDim2.new(1, -250, 1, -44),
+            BackgroundColor3 = Color3.fromRGB(28, 28, 28), Text = "Cancel", Font = config.Font,
+            TextSize = 13, TextColor3 = config.TextColor, AutoButtonColor = false, ZIndex = 502,
         })
-        Create("UICorner", {Parent = noBtn, CornerRadius = UDim.new(0, 8)})
-        local noStroke = Create("UIStroke", {
-            Parent = noBtn, Color = Color3.fromRGB(70, 70, 78), Thickness = 1, Transparency = 0.35,
-        })
-        noBtn.MouseEnter:Connect(function()
-            Tween(noBtn, {BackgroundColor3 = Color3.fromRGB(40, 40, 46), BackgroundTransparency = 0.1}, 0.12)
-            Tween(noStroke, {Transparency = 0.15}, 0.12)
-        end)
-        noBtn.MouseLeave:Connect(function()
-            Tween(noBtn, {BackgroundColor3 = Color3.fromRGB(28, 28, 32), BackgroundTransparency = useGlass and 0.25 or 0.05}, 0.12)
-            Tween(noStroke, {Transparency = 0.35}, 0.12)
-        end)
+        Create("UICorner", {Parent = noBtn, CornerRadius = UDim.new(0, 5)})
         noBtn.MouseButton1Click:Connect(function() closeDialog(false) end)
     end
 
     -- Header
     local Header = Create("Frame", {
-        Name = "Header", Parent = Main,
-        BackgroundColor3 = useGlass and Color3.fromRGB(18, 18, 22) or Color3.fromRGB(16, 16, 16),
-        BackgroundTransparency = useGlass and 0.15 or 0,
+        Name = "Header", Parent = Main, BackgroundColor3 = Color3.fromRGB(16, 16, 16),
         BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 52), ZIndex = 2,
     })
-    local headerTexT = math.min((texT or 0.72) + 0.05, 0.95)
-    ApplyStudTexture(Header, headerTexT, 0, config.BackgroundTexture, (config.TextureDarkness or 0) * 0.8)
+    ApplyStudTexture(Header, 0.45, 0)
     Create("UIGradient", {
         Parent = Header,
         Color = ColorSequence.new({
@@ -1868,7 +1723,7 @@ function EmoLib:CreateWindow(config)
     end
 
     HeaderButton("x", UDim2.new(1, -30, 0.5, -10), function()
-        ShowDialog("Close Window", "Are you sure you want to close this window?", function()
+        ShowDialog("Close EmoLib", "Are you sure you want to close and destroy the interface?", function()
             FadeOutAndDestroy()
         end)
     end)
@@ -1923,10 +1778,9 @@ function EmoLib:CreateWindow(config)
 
     local Sidebar = Create("Frame", {
         Name = "Sidebar", Parent = Main, BackgroundColor3 = config.SidebarColor,
-        BackgroundTransparency = useGlass and 0.08 or 0,
         BorderSizePixel = 0, Size = UDim2.new(0, 170, 1, -52), Position = UDim2.fromOffset(0, 52), ZIndex = 1,
     })
-    ApplyStudTexture(Sidebar, math.min((texT or 0.72) + 0.06, 0.92), 0, config.BackgroundTexture, config.TextureDarkness)
+    ApplyStudTexture(Sidebar, 0.78, 0)
     Create("UIStroke", {
         Parent = Sidebar, Color = Color3.fromRGB(25, 25, 25), Thickness = 1,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
@@ -1982,11 +1836,10 @@ function EmoLib:CreateWindow(config)
 
     local Content = Create("Frame", {
         Name = "Content", Parent = Main, BackgroundColor3 = Color3.fromRGB(8, 8, 8),
-        BackgroundTransparency = useGlass and 0.1 or 0,
         BorderSizePixel = 0, Size = UDim2.new(1, -170, 1, -52), Position = UDim2.fromOffset(170, 52),
         ClipsDescendants = true, ZIndex = 1,
     })
-    ApplyStudTexture(Content, math.min((texT or 0.72) + 0.1, 0.94), 0, config.BackgroundTexture, (config.TextureDarkness or 0) * 0.7)
+    ApplyStudTexture(Content, 0.82, 0)
 
     local ContentScroll = Create("ScrollingFrame", {
         Name = "Scroll", Parent = Content, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0),
@@ -2084,24 +1937,14 @@ function EmoLib:CreateWindow(config)
 
     local function BuildRow(page, name, title, subtitle, rightWidth)
         rightWidth = rightWidth or 0
-        local rowBg = useGlass and Color3.fromRGB(20, 20, 24) or Color3.fromRGB(14, 14, 14)
-        local rowTrans = useGlass and 0.18 or 0
         local frame = Create("Frame", {
-            Name = name, BackgroundColor3 = rowBg, BackgroundTransparency = rowTrans,
+            Name = name, BackgroundColor3 = Color3.fromRGB(14, 14, 14),
             Size = UDim2.new(1, 0, 0, ROW_MIN), BorderSizePixel = 0,
         })
         frame:SetAttribute("EmoElement", true)
         frame.Parent = page
         Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
-        Create("UIStroke", {
-            Parent = frame,
-            Color = useGlass and Color3.fromRGB(255, 255, 255) or config.StrokeColor,
-            Thickness = useGlass and 1 or 1,
-            Transparency = useGlass and 0.88 or 0.5,
-        })
-        if useGlass then
-            ApplyGlassWash(frame, CORNER_R, 0.1)
-        end
+        Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
         task.defer(function() RefreshLinkedCorners(page) end)
 
         local holder = Create("Frame", {
@@ -2419,8 +2262,7 @@ function EmoLib:CreateWindow(config)
         function Tab:AddLabel(title, subtitle)
             local frame = Create("Frame", {
                 Name = "Label",
-                BackgroundColor3 = useGlass and Color3.fromRGB(20, 20, 24) or Color3.fromRGB(14, 14, 14),
-                BackgroundTransparency = useGlass and 0.18 or 0,
+                BackgroundColor3 = Color3.fromRGB(14, 14, 14),
                 Size = UDim2.new(1, 0, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BorderSizePixel = 0,
@@ -2428,13 +2270,7 @@ function EmoLib:CreateWindow(config)
             frame:SetAttribute("EmoElement", true)
             frame.Parent = page
             Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
-            Create("UIStroke", {
-                Parent = frame,
-                Color = useGlass and Color3.fromRGB(255, 255, 255) or config.StrokeColor,
-                Thickness = 1,
-                Transparency = useGlass and 0.88 or 0.5,
-            })
-            if useGlass then ApplyGlassWash(frame, CORNER_R, 0.1) end
+            Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
             task.defer(function() RefreshLinkedCorners(page) end)
 
             local holder = Create("Frame", {
@@ -2555,11 +2391,11 @@ function EmoLib:CreateWindow(config)
                 Parent = frame, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0), Text = "", ZIndex = 2,
             })
             btn.MouseEnter:Connect(function()
-                Tween(frame, {BackgroundColor3 = useGlass and Color3.fromRGB(32, 22, 26) or Color3.fromRGB(24, 14, 14)}, 0.12)
+                Tween(frame, {BackgroundColor3 = Color3.fromRGB(24, 14, 14)}, 0.12)
                 Tween(arrow, {ImageColor3 = (config._Theme and config._Theme.AccentBright) or config.AccentColor}, 0.12)
             end)
             btn.MouseLeave:Connect(function()
-                Tween(frame, {BackgroundColor3 = useGlass and Color3.fromRGB(20, 20, 24) or Color3.fromRGB(14, 14, 14)}, 0.12)
+                Tween(frame, {BackgroundColor3 = Color3.fromRGB(14, 14, 14)}, 0.12)
                 Tween(arrow, {ImageColor3 = config.AccentColor}, 0.12)
             end)
             btn.MouseButton1Click:Connect(function() PlayClick(); if callback then callback() end end)
@@ -2580,21 +2416,13 @@ function EmoLib:CreateWindow(config)
             local default = SnapValue(cfg.Default or min, min, max, inc)
 
             local frame = Create("Frame", {
-                Name = "Slider",
-                BackgroundColor3 = useGlass and Color3.fromRGB(20, 20, 24) or Color3.fromRGB(14, 14, 14),
-                BackgroundTransparency = useGlass and 0.18 or 0,
+                Name = "Slider", BackgroundColor3 = Color3.fromRGB(14, 14, 14),
                 Size = UDim2.new(1, 0, 0, 60), BorderSizePixel = 0,
             })
             frame:SetAttribute("EmoElement", true)
             frame.Parent = page
             Create("UICorner", {Parent = frame, CornerRadius = UDim.new(0, CORNER_R)})
-            Create("UIStroke", {
-                Parent = frame,
-                Color = useGlass and Color3.fromRGB(255, 255, 255) or config.StrokeColor,
-                Thickness = 1,
-                Transparency = useGlass and 0.88 or 0.5,
-            })
-            if useGlass then ApplyGlassWash(frame, CORNER_R, 0.1) end
+            Create("UIStroke", {Parent = frame, Color = config.StrokeColor, Thickness = 1, Transparency = 0.5})
             task.defer(function() RefreshLinkedCorners(page) end)
 
             local titleL = Create("TextLabel", {
@@ -2844,21 +2672,12 @@ function EmoLib:CreateWindow(config)
             local ModalPanel = Create("Frame", {
                 Parent = ModalRoot, AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(MODAL_W, MODAL_H),
-                BackgroundColor3 = config.BackgroundColor or Color3.fromRGB(12, 12, 12),
-                BackgroundTransparency = useGlass and (config.GlassTransparency or 0.12) or 0,
+                BackgroundColor3 = Color3.fromRGB(12, 12, 12), BackgroundTransparency = 0,
                 ZIndex = 301, ClipsDescendants = true,
             })
-            Create("UICorner", {Parent = ModalPanel, CornerRadius = UDim.new(0, 12)})
-            local mStroke = Create("UIStroke", {
-                Parent = ModalPanel,
-                Color = useGlass and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(40, 40, 40),
-                Thickness = useGlass and 1.2 or 1,
-                Transparency = useGlass and 0.82 or 0.2,
-            })
-            local mTexT = config.TextureTransparency
-            if mTexT == nil then mTexT = 0.78 end
-            ApplyStudTexture(ModalPanel, mTexT, 12, config.BackgroundTexture, config.TextureDarkness)
-            if useGlass then ApplyGlassWash(ModalPanel, 12, 0.12) end
+            Create("UICorner", {Parent = ModalPanel, CornerRadius = UDim.new(0, 8)})
+            local mStroke = Create("UIStroke", {Parent = ModalPanel, Color = Color3.fromRGB(40, 40, 40), Thickness = 1, Transparency = 0.2})
+            ApplyStudTexture(ModalPanel, 0.78, 8)
 
             -- header bar
             local modalHeader = Create("Frame", {
